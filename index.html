@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A simple audio recorder using JavaScript, css and HTML5,  .">
+    <meta name="keywords" content="audio recorder, web audio, JavaScript, HTML5, online audio recorder, ofline audio recorder, " >
+    <meta name="author" content="Mr. Imoro Abubakari">
+    <title>Audio Recorder | Powered by Ghana-GPT.com</title>
+    <style>
+       .banibatiti-com {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: black;
+        }
+
+        .recorder-container {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .button-group {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-record {
+            background-color: #3b82f6;
+            color: white;
+        }
+
+        .btn-stop {
+            background-color: #ef4444;
+            color: white;
+        }
+
+        .btn-play {
+            background-color: #22c55e;
+            color: white;
+        }
+
+        .btn-save {
+            background-color: #6366f1;
+            color: white;
+        }
+
+        .btn-delete {
+            background-color: #6b7280;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        #audio-player {
+            width: 100%;
+            margin-bottom: 16px;
+        }
+        #footer{
+            clear: both;
+            background-color: #333;
+            text-align: center;
+            border-radius: 20%;
+        }
+        .copyright {
+            text-decoration: none; 
+            text-align: center;
+            color: white;
+        }
+        a{
+            text-decoration: none;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="banibatiti-com">        
+        <div class="recorder-container">
+            <h2>Audio Recorder</h2>
+            <audio id="audio-player" controls style="display: none;"></audio>
+            <div class="button-group">
+                <button id="record-btn" class="btn btn-record">
+                    🎤
+                </button>
+                <button id="stop-btn" class="btn btn-stop" style="display: none;">
+                    ⏹️
+                </button>
+                <button id="play-btn" class="btn btn-play" style="display: none;">
+                    ▶️
+                </button>
+                <button id="save-btn" class="btn btn-save" style="display: none;">
+                    💾
+                </button>
+                <button id="delete-btn" class="btn btn-delete" style="display: none;">
+                    🗑️
+                </button>
+            </div>
+        </div>
+
+       
+
+        <script>
+            const recordBtn = document.getElementById('record-btn');
+            const stopBtn = document.getElementById('stop-btn');
+            const playBtn = document.getElementById('play-btn');
+            const saveBtn = document.getElementById('save-btn');
+            const deleteBtn = document.getElementById('delete-btn');
+            const audioPlayer = document.getElementById('audio-player');
+
+            let mediaRecorder;
+            let audioChunks = [];
+
+            recordBtn.addEventListener('click', startRecording);
+            stopBtn.addEventListener('click', stopRecording);
+            playBtn.addEventListener('click', togglePlay);
+            saveBtn.addEventListener('click', saveRecording);
+            deleteBtn.addEventListener('click', deleteRecording);
+
+            async function startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        audioPlayer.src = audioUrl;
+                        audioPlayer.style.display = 'block';
+
+                        recordBtn.style.display = 'none';
+                        stopBtn.style.display = 'none';
+                        playBtn.style.display = 'flex';
+                        saveBtn.style.display = 'flex';
+                        deleteBtn.style.display = 'flex';
+
+                        audioChunks = [];
+                    };
+
+                    mediaRecorder.start();
+                    recordBtn.style.display = 'none';
+                    stopBtn.style.display = 'flex';
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                }
+            }
+
+            function stopRecording() {
+                mediaRecorder.stop();
+            }
+
+            function togglePlay() {
+                if (audioPlayer.paused) {
+                    audioPlayer.play();
+                    playBtn.textContent = '⏸️';
+                } else {
+                    audioPlayer.pause();
+                    playBtn.textContent = '▶️';
+                }
+            }
+
+            function saveRecording() {
+                const link = document.createElement('a');
+                link.href = audioPlayer.src;
+                link.download = `recording_${new Date().toISOString()}.webm`;
+                link.click();
+            }
+
+            function deleteRecording() {
+                audioPlayer.src = '';
+                audioPlayer.style.display = 'none';
+                recordBtn.style.display = 'flex';
+                stopBtn.style.display = 'none';
+                playBtn.style.display = 'none';
+                saveBtn.style.display = 'none';
+                deleteBtn.style.display = 'none';
+            }
+            
+                // DO NOT CHANGE THE CODE BELOW
+                // It is important for the functionality of this page.
+                // and is styled to be unobtrusive.
+
+            // Function to create and insert the backlink
+        function insertBacklink() {
+            if (!document.querySelector('.backlink')) {
+                // Create a new div element
+                var backlinkDiv = document.createElement('div');
+                backlinkDiv.className = 'backlink';
+    
+                // Create the anchor element
+                var backlinkAnchor = document.createElement('a');
+                backlinkAnchor.href = 'https://ghana-gpt.com';
+                backlinkAnchor.textContent = 'Powered by Ghana-GPT.com ';
+    
+                // Append the anchor to the div
+                backlinkDiv.appendChild(backlinkAnchor);
+    
+                // Append the div to the body
+                document.body.appendChild(backlinkDiv);
+            }
+        }
+    
+        // Function to remove the backlink
+        function removeBacklink() {
+            var backlinkDiv = document.querySelector('.backlink');
+            if (backlinkDiv) {
+                backlinkDiv.remove();
+            }
+        }
+    
+        // Function to update the backlink text
+        function updateBacklinkText(newText) {
+            var backlinkAnchor = document.querySelector('.backlink a');
+            if (backlinkAnchor) {
+                backlinkAnchor.textContent = newText;
+            }
+        }
+    
+        // Function to ensure the backlink is always at the bottom
+        function ensureBacklinkAtBottom() {
+            var backlinkDiv = document.querySelector('.backlink');
+            if (backlinkDiv) {
+                document.body.appendChild(backlinkDiv);
+            }
+        }
+    
+        // Call the function to insert the backlink
+        insertBacklink();
+    
+        // Example usage of the additional functions
+        // Update the backlink text after 5 seconds
+        setTimeout(() => {
+            updateBacklinkText('Powered by Ghana-GPT.com');
+        }, 5000);
+    
+        // Ensure the backlink is always at the bottom after 10 seconds
+        setTimeout(() => {
+            ensureBacklinkAtBottom();
+        }, 100000);
+    
+        // Remove the backlink after 15 seconds
+        setTimeout(() => {
+            removeBacklink();
+        }, 15000);
+    </script>
+    <style>
+        /* Basic styling for the backlink */
+        .backlink {
+            text-align: center;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-top: 1px solid #ccc;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            z-index: 1000; /* Ensure it stays on top */
+        }
+        .backlink a {
+            text-decoration: none;
+            color: #333;
+        }
+    </style>
+    </div>
+    <!-- Footer Section -->
+    <div id="footer">
+        <p class="copyright">© 2023 Audio Recorder. All rights reserved.</p>
+        <p><a href="https://ghana-gpt.com">Powered byGhana-GPT.com</a></p>
+</body>
+</html>
