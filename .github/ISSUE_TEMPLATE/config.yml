@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Live app
+    url: https://ghana-gpt.github.io/Responsive-Working-Audio-Recorder-/
+    about: Try the recorder before reporting an issue.
+  - name: Security report
+    url: https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue.

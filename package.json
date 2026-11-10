@@ -1,0 +1,53 @@
+{
+  "name": "responsive-working-audio-recorder",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A responsive, accessible, offline-capable audio recorder that runs entirely in the browser. No server, no tracking, MIT licensed.",
+  "keywords": [
+    "audio-recorder",
+    "mediarecorder",
+    "web-audio",
+    "voice-notes",
+    "pwa",
+    "offline",
+    "indexeddb",
+    "vanilla-javascript",
+    "accessibility"
+  ],
+  "author": "Imoro Abubakari <https://github.com/ghana-gpt>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/issues"
+  },
+  "homepage": "https://ghana-gpt.github.io/Responsive-Working-Audio-Recorder-/",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node tools/dev-server.mjs",
+    "dev": "node tools/dev-server.mjs",
+    "test": "node --test tests/unit/",
+    "test:watch": "node --test --watch tests/unit/",
+    "test:e2e": "node tests/e2e/recorder.e2e.mjs",
+    "test:all": "npm run test && npm run test:e2e",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate:html": "node tools/validate-html.mjs",
+    "validate": "npm run validate:html && npm run lint && npm run test",
+    "verify": "npm run validate && npm run test:e2e",
+    "icons": "node tools/generate-icons.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "prettier": "^3.9.10",
+    "puppeteer-core": "^25.16.0"
+  }
+}

@@ -1,296 +1,388 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="A simple audio recorder using JavaScript, css and HTML5,  .">
-    <meta name="keywords" content="audio recorder, web audio, JavaScript, HTML5, online audio recorder, ofline audio recorder, " >
-    <meta name="author" content="Mr. Imoro Abubakari">
-    <title>Audio Recorder | Powered by Ghana-GPT.com</title>
-    <style>
-       .banibatiti-com {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: black;
-        }
+<!doctype html>
+<html lang="en" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Audio Recorder</title>
+    <meta
+      name="description"
+      content="Record, pause, trim and download audio in your browser. Private by default: no uploads, no accounts, works offline."
+    />
+    <meta name="author" content="Imoro Abubakari" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <link rel="canonical" href="https://ghana-gpt.github.io/Responsive-Working-Audio-Recorder-/" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="stylesheet" href="styles/main.css" />
+    <script type="module" src="scripts/main.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="app.skipToContent">Skip to main content</a>
 
-        .recorder-container {
-            background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            padding: 24px;
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
+    <header class="app-header">
+      <div class="app-header__brand">
+        <svg class="app-header__logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path
+            d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Zm7 9a7 7 0 0 1-6 6.92V22h-2v-3.08A7 7 0 0 1 5 12h2a5 5 0 0 0 10 0h2Z"
+            fill="currentColor"
+          />
+        </svg>
+        <div>
+          <h1 class="app-header__title" data-i18n="app.title">Audio Recorder</h1>
+          <p class="app-header__tagline" data-i18n="app.tagline">
+            Record, listen and download audio — private by default, everything stays in your
+            browser.
+          </p>
+        </div>
+      </div>
 
-        .button-group {
-            display: flex;
-            justify-content: center;
-            gap: 16px;
-            margin-top: 16px;
-        }
+      <div class="app-header__controls">
+        <p id="offline-badge" class="badge badge--offline" hidden data-i18n="status.offline">
+          Offline — the app still works and your recordings stay stored locally.
+        </p>
+        <button id="install-btn" class="btn btn--ghost btn--sm" type="button" hidden>
+          <span class="btn__icon" aria-hidden="true">⬇</span>
+          <span class="btn__text" data-i18n="misc.install">Install app</span>
+        </button>
+        <div class="field field--inline">
+          <label for="locale-select" data-i18n="nav.language">Language</label>
+          <select id="locale-select" name="locale">
+            <option value="auto" data-i18n="nav.localeAuto">Automatic (browser language)</option>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+          </select>
+        </div>
+        <div class="field field--inline">
+          <label for="theme-select" data-i18n="nav.theme">Theme</label>
+          <select id="theme-select" name="theme">
+            <option value="system" data-i18n="nav.themeSystem">Match system</option>
+            <option value="light" data-i18n="nav.themeLight">Light</option>
+            <option value="dark" data-i18n="nav.themeDark">Dark</option>
+          </select>
+        </div>
+      </div>
+    </header>
 
-        .btn {
-            border: none;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
+    <main id="main" class="app-main" tabindex="-1">
+      <noscript>
+        <p class="notice notice--error">
+          This recorder needs JavaScript to talk to your microphone. No audio is uploaded, ever.
+        </p>
+      </noscript>
 
-        .btn-record {
-            background-color: #3b82f6;
-            color: white;
-        }
+      <section
+        id="recorder-panel"
+        class="card recorder"
+        aria-labelledby="recorder-heading"
+        data-mode="idle"
+      >
+        <h2 id="recorder-heading" class="visually-hidden" data-i18n="controls.groupLabel">
+          Recording controls
+        </h2>
 
-        .btn-stop {
-            background-color: #ef4444;
-            color: white;
-        }
+        <p id="format-hint" class="recorder__hint"></p>
 
-        .btn-play {
-            background-color: #22c55e;
-            color: white;
-        }
-
-        .btn-save {
-            background-color: #6366f1;
-            color: white;
-        }
-
-        .btn-delete {
-            background-color: #6b7280;
-            color: white;
-        }
-
-        .btn:hover {
-            opacity: 0.9;
-        }
-
-        #audio-player {
-            width: 100%;
-            margin-bottom: 16px;
-        }
-        #footer{
-            clear: both;
-            background-color: #333;
-            text-align: center;
-            border-radius: 20%;
-        }
-        .copyright {
-            text-decoration: none; 
-            text-align: center;
-            color: white;
-        }
-        a{
-            text-decoration: none;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="banibatiti-com">        
-        <div class="recorder-container">
-            <h2>Audio Recorder</h2>
-            <audio id="audio-player" controls style="display: none;"></audio>
-            <div class="button-group">
-                <button id="record-btn" class="btn btn-record">
-                    🎤
-                </button>
-                <button id="stop-btn" class="btn btn-stop" style="display: none;">
-                    ⏹️
-                </button>
-                <button id="play-btn" class="btn btn-play" style="display: none;">
-                    ▶️
-                </button>
-                <button id="save-btn" class="btn btn-save" style="display: none;">
-                    💾
-                </button>
-                <button id="delete-btn" class="btn btn-delete" style="display: none;">
-                    🗑️
-                </button>
-            </div>
+        <div class="recorder__timer">
+          <span id="timer-label" class="recorder__timer-label" data-i18n="controls.timer">
+            Elapsed time
+          </span>
+          <output id="timer" class="recorder__timer-value">00:00</output>
         </div>
 
-       
+        <div
+          id="level-meter"
+          class="meter"
+          role="meter"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          aria-label="Input level"
+        >
+          <div class="meter__track">
+            <div class="meter__fill"></div>
+          </div>
+          <div id="meter-ticks" class="meter__ticks" aria-hidden="true"></div>
+        </div>
 
-        <script>
-            const recordBtn = document.getElementById('record-btn');
-            const stopBtn = document.getElementById('stop-btn');
-            const playBtn = document.getElementById('play-btn');
-            const saveBtn = document.getElementById('save-btn');
-            const deleteBtn = document.getElementById('delete-btn');
-            const audioPlayer = document.getElementById('audio-player');
+        <div id="recorder-controls" class="recorder__controls" role="group">
+          <button id="record-btn" class="btn btn--record" type="button">
+            <span class="btn__icon" aria-hidden="true">●</span>
+            <span class="btn__text" data-i18n="controls.record">Start recording</span>
+          </button>
+          <button id="pause-btn" class="btn btn--pause" type="button" hidden>
+            <span class="btn__icon" aria-hidden="true">❚❚</span>
+            <span class="btn__text" data-i18n="controls.pause">Pause</span>
+          </button>
+          <button id="stop-btn" class="btn btn--stop" type="button" hidden>
+            <span class="btn__icon" aria-hidden="true">■</span>
+            <span class="btn__text" data-i18n="controls.stop">Stop recording</span>
+          </button>
+        </div>
 
-            let mediaRecorder;
-            let audioChunks = [];
+        <p id="status-message" class="recorder__status" data-i18n="status.idle">
+          Ready. Press record to start.
+        </p>
+        <p id="recording-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
 
-            recordBtn.addEventListener('click', startRecording);
-            stopBtn.addEventListener('click', stopRecording);
-            playBtn.addEventListener('click', togglePlay);
-            saveBtn.addEventListener('click', saveRecording);
-            deleteBtn.addEventListener('click', deleteRecording);
+        <div id="error-panel" class="error-panel" role="alert" hidden>
+          <h3 class="error-panel__title" data-i18n="errors.title">Microphone problem</h3>
+          <p id="error-message"></p>
+          <button id="error-retry" class="btn btn--primary btn--sm" type="button">Try again</button>
+        </div>
+      </section>
 
-            async function startRecording() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream);
+      <section id="library" class="card library" aria-labelledby="library-heading">
+        <div class="library__header">
+          <h2 id="library-heading" data-i18n="library.title">Your recordings</h2>
+          <p id="library-count" class="library__count" aria-live="polite"></p>
+        </div>
 
-                    mediaRecorder.ondataavailable = (event) => {
-                        audioChunks.push(event.data);
-                    };
+        <div class="library__toolbar" role="group" aria-label="Library tools">
+          <div class="field field--grow">
+            <label class="visually-hidden" for="search-input" data-i18n="library.search">
+              Search recordings
+            </label>
+            <input
+              id="search-input"
+              type="search"
+              autocomplete="off"
+              data-i18n-placeholder="library.searchPlaceholder"
+              placeholder="Search by name or tag"
+            />
+          </div>
+          <div class="field">
+            <label class="visually-hidden" for="sort-select" data-i18n="library.sort">
+              Sort by
+            </label>
+            <select id="sort-select">
+              <option value="newest" data-i18n="library.sortNewest">Newest first</option>
+              <option value="oldest" data-i18n="library.sortOldest">Oldest first</option>
+              <option value="name" data-i18n="library.sortName">Name (A–Z)</option>
+              <option value="longest" data-i18n="library.sortLongest">Longest first</option>
+            </select>
+          </div>
+          <button id="import-btn" class="btn btn--ghost btn--sm" type="button">
+            <span class="btn__icon" aria-hidden="true">⇪</span>
+            <span class="btn__text" data-i18n="library.import">Import audio files</span>
+          </button>
+          <input
+            id="import-input"
+            class="visually-hidden"
+            type="file"
+            accept="audio/*"
+            multiple
+            tabindex="-1"
+          />
+          <button id="download-all-btn" class="btn btn--ghost btn--sm" type="button">
+            <span class="btn__icon" aria-hidden="true">⤓</span>
+            <span class="btn__text" data-i18n="library.downloadAll">Download all as ZIP</span>
+          </button>
+          <button id="clear-all-btn" class="btn btn--ghost btn--sm btn--danger" type="button">
+            <span class="btn__icon" aria-hidden="true">🗑</span>
+            <span class="btn__text" data-i18n="library.clearAll">Delete all</span>
+          </button>
+        </div>
 
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        audioPlayer.src = audioUrl;
-                        audioPlayer.style.display = 'block';
+        <div id="selection-bar" class="selection-bar" hidden>
+          <label class="checkbox">
+            <input id="select-all" type="checkbox" />
+            <span data-i18n="library.selectAll">Select every recording</span>
+          </label>
+          <p id="selection-count" class="selection-bar__count" aria-live="polite"></p>
+          <button id="download-selected-btn" class="btn btn--ghost btn--sm" type="button">
+            <span class="btn__icon" aria-hidden="true">⤓</span>
+            <span class="btn__text" data-i18n="library.downloadSelected">
+              Download selected as ZIP
+            </span>
+          </button>
+          <button id="delete-selected-btn" class="btn btn--ghost btn--sm btn--danger" type="button">
+            <span class="btn__icon" aria-hidden="true">🗑</span>
+            <span class="btn__text" data-i18n="library.deleteSelected">Delete selected</span>
+          </button>
+        </div>
 
-                        recordBtn.style.display = 'none';
-                        stopBtn.style.display = 'none';
-                        playBtn.style.display = 'flex';
-                        saveBtn.style.display = 'flex';
-                        deleteBtn.style.display = 'flex';
+        <audio id="preview-audio" class="player" controls preload="metadata" hidden></audio>
 
-                        audioChunks = [];
-                    };
+        <p id="library-empty" class="notice" data-i18n="library.empty">
+          No recordings yet. Everything you record shows up here and stays on this device.
+        </p>
 
-                    mediaRecorder.start();
-                    recordBtn.style.display = 'none';
-                    stopBtn.style.display = 'flex';
-                } catch (err) {
-                    console.error('Error accessing microphone:', err);
-                }
-            }
+        <ul id="recording-list" class="recording-list" aria-labelledby="library-heading"></ul>
+      </section>
 
-            function stopRecording() {
-                mediaRecorder.stop();
-            }
+      <details id="settings-panel" class="card disclosure">
+        <summary class="disclosure__summary" data-i18n="settings.title">Preferences</summary>
+        <form id="settings-form" class="settings" novalidate>
+          <fieldset class="settings__group">
+            <legend data-i18n="settings.format">Recording format</legend>
+            <div id="format-options" class="radio-grid"></div>
+            <p class="hint" data-i18n="settings.formatHint">
+              Only formats your browser supports are enabled.
+            </p>
+          </fieldset>
 
-            function togglePlay() {
-                if (audioPlayer.paused) {
-                    audioPlayer.play();
-                    playBtn.textContent = '⏸️';
-                } else {
-                    audioPlayer.pause();
-                    playBtn.textContent = '▶️';
-                }
-            }
+          <fieldset class="settings__group">
+            <legend data-i18n="settings.quality">Audio quality</legend>
+            <div class="field">
+              <label for="quality-select" data-i18n="settings.quality">Audio quality</label>
+              <select id="quality-select"></select>
+            </div>
+            <p class="hint" data-i18n="settings.qualityHint">
+              Bitrate for compressed formats. WAV always uses 16-bit PCM.
+            </p>
+          </fieldset>
 
-            function saveRecording() {
-                const link = document.createElement('a');
-                link.href = audioPlayer.src;
-                link.download = `recording_${new Date().toISOString()}.webm`;
-                link.click();
-            }
+          <fieldset class="settings__group">
+            <legend data-i18n="settings.processing">Microphone processing</legend>
+            <label class="checkbox">
+              <input id="noise-suppression" type="checkbox" />
+              <span data-i18n="settings.noiseSuppression">Noise suppression</span>
+            </label>
+            <label class="checkbox">
+              <input id="echo-cancellation" type="checkbox" />
+              <span data-i18n="settings.echoCancellation">Echo cancellation</span>
+            </label>
+            <label class="checkbox">
+              <input id="auto-gain" type="checkbox" />
+              <span data-i18n="settings.autoGainControl">Automatic gain</span>
+            </label>
+            <p class="hint" data-i18n="settings.processingHint">
+              Applied by the browser or the OS when available. Turn off for raw sound.
+            </p>
+          </fieldset>
 
-            function deleteRecording() {
-                audioPlayer.src = '';
-                audioPlayer.style.display = 'none';
-                recordBtn.style.display = 'flex';
-                stopBtn.style.display = 'none';
-                playBtn.style.display = 'none';
-                saveBtn.style.display = 'none';
-                deleteBtn.style.display = 'none';
-            }
-            
-                // DO NOT CHANGE THE CODE BELOW
-                // It is important for the functionality of this page.
-                // and is styled to be unobtrusive.
+          <fieldset class="settings__group">
+            <legend data-i18n="settings.stats">Local statistics</legend>
+            <p id="storage-stats" class="settings__stats"></p>
+            <p id="storage-status" class="hint"></p>
+          </fieldset>
 
-            // Function to create and insert the backlink
-        function insertBacklink() {
-            if (!document.querySelector('.backlink')) {
-                // Create a new div element
-                var backlinkDiv = document.createElement('div');
-                backlinkDiv.className = 'backlink';
-    
-                // Create the anchor element
-                var backlinkAnchor = document.createElement('a');
-                backlinkAnchor.href = 'https://ghana-gpt.com';
-                backlinkAnchor.textContent = 'Powered by Ghana-GPT.com ';
-    
-                // Append the anchor to the div
-                backlinkDiv.appendChild(backlinkAnchor);
-    
-                // Append the div to the body
-                document.body.appendChild(backlinkDiv);
-            }
-        }
-    
-        // Function to remove the backlink
-        function removeBacklink() {
-            var backlinkDiv = document.querySelector('.backlink');
-            if (backlinkDiv) {
-                backlinkDiv.remove();
-            }
-        }
-    
-        // Function to update the backlink text
-        function updateBacklinkText(newText) {
-            var backlinkAnchor = document.querySelector('.backlink a');
-            if (backlinkAnchor) {
-                backlinkAnchor.textContent = newText;
-            }
-        }
-    
-        // Function to ensure the backlink is always at the bottom
-        function ensureBacklinkAtBottom() {
-            var backlinkDiv = document.querySelector('.backlink');
-            if (backlinkDiv) {
-                document.body.appendChild(backlinkDiv);
-            }
-        }
-    
-        // Call the function to insert the backlink
-        insertBacklink();
-    
-        // Example usage of the additional functions
-        // Update the backlink text after 5 seconds
-        setTimeout(() => {
-            updateBacklinkText('Powered by Ghana-GPT.com');
-        }, 5000);
-    
-        // Ensure the backlink is always at the bottom after 10 seconds
-        setTimeout(() => {
-            ensureBacklinkAtBottom();
-        }, 100000);
-    
-        // Remove the backlink after 15 seconds
-        setTimeout(() => {
-            removeBacklink();
-        }, 15000);
-    </script>
-    <style>
-        /* Basic styling for the backlink */
-        .backlink {
-            text-align: center;
-            padding: 10px;
-            background-color: #f1f1f1;
-            border-top: 1px solid #ccc;
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-            z-index: 1000; /* Ensure it stays on top */
-        }
-        .backlink a {
-            text-decoration: none;
-            color: #333;
-        }
-    </style>
-    </div>
-    <!-- Footer Section -->
-    <div id="footer">
-        <p class="copyright">© 2023 Audio Recorder. All rights reserved.</p>
-        <p><a href="https://ghana-gpt.com">Powered byGhana-GPT.com</a></p>
-</body>
+          <fieldset class="settings__group">
+            <legend data-i18n="settings.credit">Sponsor credit</legend>
+            <label class="checkbox">
+              <input id="show-credit" type="checkbox" />
+              <span data-i18n="settings.credit">Show the sponsor credit in the footer</span>
+            </label>
+            <p class="hint" data-i18n="settings.creditHint">
+              A plain static link. No scripts, no tracking, always switchable.
+            </p>
+          </fieldset>
+
+          <p class="settings__actions">
+            <button id="reset-settings-btn" class="btn btn--ghost btn--sm" type="button">
+              <span class="btn__icon" aria-hidden="true">↺</span>
+              <span class="btn__text" data-i18n="settings.reset">Reset preferences</span>
+            </button>
+          </p>
+        </form>
+      </details>
+
+      <details id="help-panel" class="card disclosure">
+        <summary class="disclosure__summary" data-i18n="nav.help">Help</summary>
+        <div class="help">
+          <h2 data-i18n="help.title">How to use the recorder</h2>
+          <ol class="help__steps">
+            <li data-i18n="help.step1">Press the record button and allow the microphone.</li>
+            <li data-i18n="help.step2">
+              Pause and resume whenever you like — the timer only counts while recording.
+            </li>
+            <li data-i18n="help.step3">
+              Press stop to save. Audio is stored on this device in IndexedDB.
+            </li>
+            <li data-i18n="help.step4">
+              Rename, tag, trim, play or download — one file at a time or as a ZIP.
+            </li>
+          </ol>
+          <p class="notice notice--privacy" data-i18n="help.privacy">
+            Audio never leaves your device. No server, no account, no tracking.
+          </p>
+          <h3 data-i18n="settings.shortcuts">Keyboard shortcuts</h3>
+          <ul class="help__shortcuts">
+            <li data-i18n="shortcut.record">R or Space — start / stop</li>
+            <li data-i18n="shortcut.pause">P — pause or resume</li>
+            <li data-i18n="shortcut.play">Enter — play the selected recording</li>
+            <li data-i18n="shortcut.delete">Delete — delete the focused recording</li>
+            <li data-i18n="shortcut.help">? — open this help panel</li>
+          </ul>
+          <p class="hint" data-i18n="shortcut.note">Shortcuts are ignored while you are typing.</p>
+        </div>
+      </details>
+    </main>
+
+    <footer class="app-footer">
+      <p id="footer-copy" class="app-footer__copy"></p>
+      <nav class="app-footer__links" aria-label="Project links">
+        <a
+          href="https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-"
+          rel="noopener noreferrer"
+        >
+          <span data-i18n="footer.source">Source code</span>
+        </a>
+        <a
+          href="https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/blob/main/LICENSE"
+          rel="noopener noreferrer"
+        >
+          <span data-i18n="footer.license">MIT licence</span>
+        </a>
+      </nav>
+      <p id="credit-line" class="app-footer__credit" hidden>
+        <span data-i18n="footer.creditLabel">Sponsor:</span>
+        <a href="https://ghana-gpt.com" rel="noopener noreferrer">Ghana-GPT.com</a>
+      </p>
+    </footer>
+
+    <div id="toast-host" class="toast-host"></div>
+
+    <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+      <h2 id="confirm-title" class="dialog__title"></h2>
+      <p id="confirm-body" class="dialog__body"></p>
+      <div class="dialog__actions">
+        <button id="confirm-cancel" class="btn btn--ghost" type="button">Cancel</button>
+        <button id="confirm-accept" class="btn btn--danger-solid" type="button">Delete</button>
+      </div>
+    </dialog>
+
+    <dialog id="trim-dialog" class="dialog dialog--wide" aria-labelledby="trim-title">
+      <h2 id="trim-title" class="dialog__title" data-i18n="dialog.trimTitle">Trim recording</h2>
+      <p id="trim-description" class="dialog__body"></p>
+      <div class="trim">
+        <canvas id="trim-canvas" class="trim__canvas" height="120" aria-hidden="true"></canvas>
+        <div class="trim__controls">
+          <div class="field">
+            <label for="trim-start">
+              <span data-i18n="dialog.trimStart">Start</span>
+              <output id="trim-start-value" for="trim-start">0.0 s</output>
+            </label>
+            <input id="trim-start" type="range" min="0" max="100" step="0.01" value="0" />
+          </div>
+          <div class="field">
+            <label for="trim-end">
+              <span data-i18n="dialog.trimEnd">End</span>
+              <output id="trim-end-value" for="trim-end">0.0 s</output>
+            </label>
+            <input id="trim-end" type="range" min="0" max="100" step="0.01" value="100" />
+          </div>
+        </div>
+      </div>
+      <p id="trim-invalid" class="form__error" role="alert" hidden></p>
+      <p class="hint" data-i18n="dialog.trimNote">
+        Trimming exports 16-bit PCM WAV, so the copy may be larger than the original.
+      </p>
+      <div class="dialog__actions">
+        <button id="trim-cancel" class="btn btn--ghost" type="button" data-i18n="actions.cancel">
+          Cancel
+        </button>
+        <button id="trim-apply" class="btn btn--primary" type="button" data-i18n="dialog.trimApply">
+          Save copy
+        </button>
+      </div>
+    </dialog>
+  </body>
 </html>

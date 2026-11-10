@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Test / tooling artefacts
+coverage/
+tests/e2e/.artifacts/
+*.log
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Local environment
+.env
+.env.local

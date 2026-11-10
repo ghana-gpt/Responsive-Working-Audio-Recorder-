@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest an improvement for the recorder
+title: '[feat]: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project values small, dependency-free changes. Features that need a server,
+        a bundler or a third-party library are unlikely to be accepted — but say why it
+        matters and we can usually find a lighter solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: I record long interviews and want to pause hands-free.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behaviour you would like, including keyboard/assistive-tech considerations.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Recording engine
+        - Library / organisation
+        - Trimming / playback
+        - Preferences
+        - Accessibility
+        - Offline / PWA
+        - Translations
+        - Developer experience
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This can be implemented without a runtime dependency or a build step
+          required: true
+        - label: I am willing to open a pull request

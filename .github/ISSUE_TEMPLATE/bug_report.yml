@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in the recorder does not work as expected
+title: '[bug]: '
+labels: ['bug', 'needs triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please never paste real recordings or personal audio —
+        a description of the file (format, size, duration) is enough.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including any error message shown.
+      placeholder: Pressing Stop leaves the panel in "Processing audio…" forever.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app on https://ghana-gpt.github.io/...
+        2. Press Start recording and allow the microphone
+        3. Pause, then Resume, then Stop
+        4. The panel never leaves "Processing audio…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 141 on Android 15
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: How are you running the app?
+      options:
+        - GitHub Pages (https)
+        - Local dev server (npm start / localhost)
+        - Opened index.html directly from disk (file://)
+        - Self-hosted
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Copy any errors from the DevTools console (Settings → more tools).
+      render: shell
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I am not sharing private audio or personal data
+          required: true

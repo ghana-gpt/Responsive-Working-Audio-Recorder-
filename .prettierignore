@@ -1,0 +1,9 @@
+node_modules/
+package-lock.json
+icons/*.png
+image/
+coverage/
+tests/e2e/.artifacts/
+*.min.js
+# Managed by VS Code, not by us (it rewrites the file with its own indentation).
+.vscode/
