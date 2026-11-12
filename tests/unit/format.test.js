@@ -6,6 +6,7 @@ import {
   formatBytes,
   formatDateTime,
   formatDuration,
+  formatSeconds,
   formatRelativeTime,
   timestampForFilename,
 } from '../../scripts/modules/format.js';
@@ -27,6 +28,17 @@ test('formatDuration normalises invalid input instead of printing NaN', () => {
   assert.equal(formatDuration(Number.NaN), '00:00');
   assert.equal(formatDuration(undefined), '00:00');
   assert.equal(formatDuration('4200'), '00:04');
+});
+
+test('formatSeconds keeps one decimal below a minute for trim handles', () => {
+  assert.equal(formatSeconds(0), '0.0 s');
+  assert.equal(formatSeconds(0.4), '0.4 s');
+  assert.equal(formatSeconds(0.872), '0.9 s');
+  assert.equal(formatSeconds(59.94), '59.9 s');
+  assert.equal(formatSeconds(60), '01:00');
+  assert.equal(formatSeconds(3723), '1:02:03');
+  assert.equal(formatSeconds(-3), '0.0 s');
+  assert.equal(formatSeconds(Number.NaN), '0.0 s');
 });
 
 test('formatBytes uses binary units', () => {

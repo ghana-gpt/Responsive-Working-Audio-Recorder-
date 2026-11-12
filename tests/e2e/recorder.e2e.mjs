@@ -237,6 +237,25 @@ async function main() {
       assert.equal(playing, true, 'the preview player is playing');
     });
 
+    await step('shows sub-second trim readouts and cancels safely', async () => {
+      await page.click('#recording-list .recording [data-action="trim"]');
+      await page.waitForSelector('#trim-dialog[open]', { timeout: 10000 });
+      const end = await textOf('#trim-end-value');
+      assert.match(end, /^\d+\.\d s$/, `the end readout "${end}" keeps a decimal`);
+      // The trim handles are percentages of the clip, not seconds.
+      await page.$eval('#trim-end', (input) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, '50');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const half = await textOf('#trim-end-value');
+      assert.match(half, /^\d+\.\d s$/, `the 50% readout "${half}" keeps a decimal`);
+      assert.notEqual(half, end, 'the readout tracks the handle');
+      await page.click('#trim-cancel');
+      await page.waitForFunction(() => document.querySelector('#trim-dialog')?.open === false);
+      assert.equal(await rowCount(), 1, 'cancelling keeps the library untouched');
+    });
+
     await step('downloads a recording and reports it with a toast', async () => {
       await page.click('#recording-list .recording [data-action="download"]');
       await page.waitForSelector('#toast-host .toast--success', { timeout: 10000 });

@@ -7,7 +7,7 @@
  */
 
 import { $, restoreFocus } from './dom.js';
-import { formatDuration } from './format.js';
+import { formatSeconds } from './format.js';
 
 /** Read a CSS custom property, with a sane fallback for exotic browsers. */
 function customColor(name, fallback) {
@@ -137,8 +137,8 @@ export function createDialogs({ root = document, t }) {
       function updateReadouts() {
         const start = startSeconds();
         const end = endSeconds();
-        if (startValue) startValue.textContent = formatDuration(Math.round(start * 1000));
-        if (endValue) endValue.textContent = formatDuration(Math.round(end * 1000));
+        if (startValue) startValue.textContent = formatSeconds(start);
+        if (endValue) endValue.textContent = formatSeconds(end);
         const valid = end - start >= MIN_SECONDS;
         if (trimInvalid) {
           trimInvalid.textContent = valid ? '' : t('dialog.trimInvalid');

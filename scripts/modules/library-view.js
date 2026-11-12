@@ -8,7 +8,7 @@
  */
 
 import { $, createElement, setFlag } from './dom.js';
-import { formatBytes, formatDateTime, formatDuration } from './format.js';
+import { formatBytes, formatDateTime, formatDuration, formatSeconds } from './format.js';
 
 /**
  * @param {{
@@ -215,6 +215,13 @@ export function createLibraryView({ root = document, t, locale, canShare = false
   function buildRow(record, model) {
     const name = record.name || t('recording.untitled');
     const isPlaying = model.activeId === record.id && model.playing;
+    const durationMs = Number(record.durationMs) || 0;
+    // A sub-second clip rendered as "00:00" reads like a failed save, so those
+    // keep one decimal; everything else stays in the compact mm:ss clock form.
+    const duration =
+      durationMs > 0 && durationMs < 1000
+        ? formatSeconds(durationMs / 1000)
+        : formatDuration(durationMs);
 
     const tags = Array.isArray(record.tags) ? record.tags.slice() : [];
     const tagList = createElement('ul', { class: 'recording__tags' });
@@ -274,7 +281,7 @@ export function createLibraryView({ root = document, t, locale, canShare = false
                   text: t('recording.meta', {
                     format: String(record.extension || 'audio').toUpperCase(),
                     size: formatBytes(record.size),
-                    duration: formatDuration(record.durationMs),
+                    duration,
                   }),
                 }),
                 createElement('p', {

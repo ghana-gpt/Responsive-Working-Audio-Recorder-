@@ -147,6 +147,7 @@ export const messages = {
     'settings.noiseSuppression': 'Noise suppression',
     'settings.echoCancellation': 'Echo cancellation',
     'settings.autoGainControl': 'Automatic gain control',
+    'settings.creditTitle': 'Sponsor credit',
     'settings.credit': 'Show sponsor credit in the footer',
     'settings.creditHint': 'A single static link. No scripts, no tracking, always removable.',
     'settings.stats': 'Local statistics',
@@ -388,6 +389,7 @@ export const messages = {
     'settings.noiseSuppression': 'Réduction du bruit',
     'settings.echoCancellation': 'Annulation d’écho',
     'settings.autoGainControl': 'Gain automatique',
+    'settings.creditTitle': 'Crédit du sponsor',
     'settings.credit': 'Afficher le crédit du sponsor dans le pied de page',
     'settings.creditHint':
       'Un simple lien statique. Aucun script, aucun suivi, toujours désactivable.',

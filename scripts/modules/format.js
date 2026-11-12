@@ -22,6 +22,20 @@ export function formatDuration(milliseconds) {
 }
 
 /**
+ * Format a position inside a clip where sub-second precision matters (the trim
+ * handles). Below a minute it keeps one decimal so 0.4 s and 0.9 s do not both
+ * collapse to "00:00"; longer values fall back to `formatDuration`.
+ *
+ * @param {number} seconds
+ * @returns {string} e.g. "0.0 s", "0.9 s", "01:02"
+ */
+export function formatSeconds(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 60) return `${value.toFixed(1)} s`;
+  return formatDuration(Math.round(value * 1000));
+}
+
+/**
  * Human readable file size using binary multiples (1 KB = 1024 B).
  *
  * @param {number} bytes

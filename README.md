@@ -32,10 +32,11 @@ promise while fixing the engineering:
 
 ## Features
 
-- **Recording** — start / pause / resume / stop, live input meter, elapsed timer,
-  12-format fallback ladder (`webm/opus` → `ogg/opus` → `mp4/aac` → …), selectable
-  bitrate, microphone processing toggles (echo cancellation, noise suppression,
-  auto gain), and a WAV path that captures compressed audio then re-encodes 16-bit PCM.
+- **Recording** — start / pause / resume / stop, live input meter, elapsed timer, a
+  four-container fallback ladder (`webm/opus` → `ogg/opus` → `mp4/aac` → `mp3`, eight
+  candidate MIME types), a bitrate control, microphone processing toggles (echo cancellation,
+  noise suppression, auto gain), and a WAV path that captures compressed audio then re-encodes
+  16-bit PCM.
 - **Library** — every take is stored in IndexedDB with a name, tags, duration and size;
   search, sort (newest / oldest / name / longest), inline rename, multi-select,
   bulk delete, "download all as ZIP", per-item download and share.
