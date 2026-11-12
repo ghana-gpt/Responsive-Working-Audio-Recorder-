@@ -26,9 +26,9 @@ promise while fixing the engineering:
 | Hard-coded `audio/webm`                          | Capability detection picks the best supported container; WAV is encoded in JS |
 | Recordings vanish on reload                      | IndexedDB repository with an in-memory cache in front                         |
 | Recording duration includes pauses               | Elapsed time excludes paused intervals                                        |
-| One download at a time                           | Bulk selection, ZIP export, Web Share API                                     |
+| One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                         |
 | English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                        |
-| Untested                                         | 60+ unit tests, HTML/service-worker validation and a real-browser e2e suite   |
+| Untested                                         | 80+ unit tests, HTML/service-worker validation and a real-browser e2e suite   |
 
 ## Features
 
@@ -39,6 +39,12 @@ promise while fixing the engineering:
 - **Library** — every take is stored in IndexedDB with a name, tags, duration and size;
   search, sort (newest / oldest / name / longest), inline rename, multi-select,
   bulk delete, "download all as ZIP", per-item download and share.
+- **Import and restore** — audio files picked from disk are decoded before they are
+  stored, and a ZIP backup exported by the app can be dropped back in: every entry is
+  checksum-verified against the archive's central directory, so damaged files are
+  skipped and reported instead of corrupting the library.
+- **Storage insight** — a preferences panel shows usage against the browser quota,
+  the largest recordings and the current protection state.
 - **Trimming** — canvas waveform preview with draggable handles; the trimmed copy is
   saved as a **new** WAV recording (the original is never destroyed).
 - **Playback** — one shared `<audio>` preview player, no object-URL leaks.
@@ -116,6 +122,7 @@ button/link has focus, so they never steal a keystroke from an active control.
 │       ├── wav.js              # PCM encoding, trimming, peak envelope
 │       ├── audio-utils.js      # Decode, convert, download, share, clipboard
 │       ├── zip.js              # Dependency-free ZIP writer (CRC32)
+│       ├── zip-reader.js       # Streaming ZIP reader (central directory, CRC checks)
 │       ├── sanitize.js         # File-name/tag/text sanitising
 │       ├── format.js           # Duration/size/date formatting
 │       ├── settings.js         # Validated localStorage preferences, themes
@@ -165,13 +172,16 @@ npm run verify
 ```
 
 - **Unit tests** cover the pure modules: WAV encoding (cross-checked with `ffprobe`
-  when available), ZIP integrity (`unzip -t`), MIME fallbacks, search/sort/stats,
-  sanitising, formatting, state transitions and i18n key parity — plus the static dev
-  server (MIME types, `no-store`, app-shell fallback, 404s and path containment).
+  when available), ZIP writing and reading (`unzip -t`, ZIP64, CRC failures, DEFLATE
+  inflation), MIME fallbacks, search/sort/stats, sanitising, formatting, state
+  transitions and i18n key parity — plus the static dev server (MIME types, `no-store`,
+  app-shell fallback, 404s and path containment).
 - **The e2e suite** boots the real app in Chromium with
   `--use-fake-device-for-media-stream`, then records, pauses, resumes, stops, reloads
-  (IndexedDB persistence), renames with tags, plays, downloads, deletes, switches
-  language and theme, exercises the `?` shortcut and waits for the service worker.
+  (IndexedDB persistence), renames with tags, plays, downloads, deletes, imports a long
+  library, pages through it, bulk deletes, restores a ZIP backup, rejects a damaged
+  archive, switches language and theme, exercises the `?` shortcut and waits for the
+  service worker.
   Set `PUPPETEER_EXECUTABLE_PATH` if Chrome is not in a standard location and
   `E2E_STRICT=1` to fail instead of skipping when no browser is found (CI does both).
 

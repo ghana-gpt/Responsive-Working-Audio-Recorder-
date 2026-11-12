@@ -110,3 +110,33 @@ test('generated archive passes `unzip -t` and extracts identical files', () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('forced ZIP64 archives pass `unzip -t`', () => {
+  try {
+    execFileSync('unzip', ['-v'], { stdio: 'ignore' });
+  } catch {
+    console.warn('unzip not available — skipping ZIP64 integrity check');
+    return;
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'zip64-test-'));
+  try {
+    const archive = createZip(
+      [
+        { name: 'note-one.webm', data: new Uint8Array([1, 2, 3, 4, 5]) },
+        { name: 'note-two.wav', data: bytes('second payload') },
+      ],
+      { date: new Date(2026, 10, 9, 9, 0, 0), forceZip64: true },
+    );
+    const zipPath = join(directory, 'zip64.zip');
+    writeFileSync(zipPath, archive);
+
+    const testOutput = execFileSync('unzip', ['-t', zipPath]).toString();
+    assert.match(testOutput, /No errors detected/);
+
+    const outDir = join(directory, 'out');
+    execFileSync('unzip', ['-q', zipPath, '-d', outDir]);
+    assert.equal(readFileSync(join(outDir, 'note-two.wav'), 'utf8'), 'second payload');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

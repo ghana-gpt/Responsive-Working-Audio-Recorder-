@@ -22,6 +22,75 @@ export function floatToPcm16(sample) {
 }
 
 /**
+ * Build the 44-byte RIFF/WAVE header for 16-bit PCM.
+ *
+ * Split out from `encodeWav` so the worker can write the header once and then
+ * stream PCM frames into a pre-allocated buffer in blocks.
+ *
+ * @param {number} channelCount
+ * @param {number} sampleRate
+ * @param {number} frameCount
+ * @returns {ArrayBuffer}
+ */
+export function wavHeader(channelCount, sampleRate, frameCount) {
+  const channels = Math.max(1, Math.round(Number(channelCount) || 1));
+  const rate = Math.max(1, Math.round(Number(sampleRate) || 1));
+  const frames = Math.max(0, Math.round(Number(frameCount) || 0));
+  const blockAlign = channels * 2;
+  const dataBytes = frames * blockAlign;
+  const buffer = new ArrayBuffer(WAV_HEADER_BYTES);
+  const view = new DataView(buffer);
+
+  const writeAscii = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+
+  writeAscii(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true); // file size minus the first 8 bytes
+  writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM fmt chunk size
+  view.setUint16(20, 1, true); // audio format 1 = PCM
+  view.setUint16(22, channels, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * blockAlign, true); // byte rate
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // bits per sample
+  writeAscii(36, 'data');
+  view.setUint32(40, dataBytes, true);
+
+  return buffer;
+}
+
+/**
+ * Write PCM samples for `[startFrame, endFrame)` into an existing DataView.
+ *
+ * @param {DataView} view destination view (header already written)
+ * @param {number} offset byte offset to start writing at
+ * @param {Float32Array[]} channels
+ * @param {number} [startFrame]
+ * @param {number} [endFrame]
+ * @returns {number} the offset just past the last written sample
+ */
+export function encodeWavFrames(view, offset, channels, startFrame = 0, endFrame) {
+  const channelCount = channels.length;
+  const total = channels[0]?.length ?? 0;
+  const from = Math.max(0, Math.min(total, Math.floor(Number(startFrame) || 0)));
+  const to = Math.max(
+    from,
+    Math.min(total, Number.isFinite(Number(endFrame)) ? Math.floor(Number(endFrame)) : total),
+  );
+  let cursor = offset;
+  for (let frame = from; frame < to; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      view.setInt16(cursor, Math.round(floatToPcm16(channels[channel][frame])), true);
+      cursor += 2;
+    }
+  }
+  return cursor;
+}
+
+/**
  * Encode one or more Float32 channel buffers as a RIFF/WAVE PCM16 file.
  *
  * @param {Float32Array[]} channels
@@ -47,38 +116,10 @@ export function encodeWav(channels, sampleRate) {
     }
   }
 
-  const bytesPerSample = 2;
-  const blockAlign = channelCount * bytesPerSample;
-  const dataBytes = frameCount * blockAlign;
-  const buffer = new ArrayBuffer(WAV_HEADER_BYTES + dataBytes);
-  const view = new DataView(buffer);
-
-  const writeAscii = (offset, text) => {
-    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-
-  writeAscii(0, 'RIFF');
-  view.setUint32(4, 36 + dataBytes, true); // file size minus the first 8 bytes
-  writeAscii(8, 'WAVE');
-  writeAscii(12, 'fmt ');
-  view.setUint32(16, 16, true); // PCM fmt chunk size
-  view.setUint16(20, 1, true); // audio format 1 = PCM
-  view.setUint16(22, channelCount, true);
-  view.setUint32(24, Math.round(sampleRate), true);
-  view.setUint32(28, Math.round(sampleRate) * blockAlign, true); // byte rate
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bytesPerSample * 8, true); // bits per sample
-  writeAscii(36, 'data');
-  view.setUint32(40, dataBytes, true);
-
-  let offset = WAV_HEADER_BYTES;
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    for (let channel = 0; channel < channelCount; channel += 1) {
-      view.setInt16(offset, Math.round(floatToPcm16(channels[channel][frame])), true);
-      offset += bytesPerSample;
-    }
-  }
-
+  const view = new DataView(wavHeader(channelCount, sampleRate, frameCount));
+  const buffer = new ArrayBuffer(WAV_HEADER_BYTES + frameCount * channelCount * 2);
+  new Uint8Array(buffer).set(new Uint8Array(view.buffer));
+  encodeWavFrames(new DataView(buffer), WAV_HEADER_BYTES, channels);
   return buffer;
 }
 

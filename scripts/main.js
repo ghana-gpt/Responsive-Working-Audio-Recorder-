@@ -14,12 +14,24 @@ import {
   shareRecording,
   trimToWav,
 } from './modules/audio-utils.js';
-import { estimateStorage, isIndexedDbSupported, requestPersistentStorage } from './modules/db.js';
+import {
+  estimateStorage,
+  isIndexedDbSupported,
+  requestPersistentStorage,
+  storageLevel,
+  storagePercent,
+} from './modules/db.js';
 import { createDialogs } from './modules/dialogs.js';
 import { $, isEditableTarget, setFlag, translateTree } from './modules/dom.js';
-import { buildFileName, timestampForFilename } from './modules/format.js';
-import { createTranslator, resolveLocale, SUPPORTED_LOCALES } from './modules/i18n.js';
+import { buildFileName, formatBytes, timestampForFilename } from './modules/format.js';
+import {
+  createTranslator,
+  errorKeyForCode,
+  resolveLocale,
+  SUPPORTED_LOCALES,
+} from './modules/i18n.js';
 import { createLibraryView } from './modules/library-view.js';
+import { LIBRARY_PAGE_SIZE, SORT_OPTIONS, pageWindow, topRecordings } from './modules/library.js';
 import { extensionForMime, resolveFormat } from './modules/mime.js';
 import {
   buildAudioConstraints,
@@ -32,9 +44,10 @@ import { parseTags, sanitizeDisplayName, sanitizeFileName } from './modules/sani
 import { createSettingsView } from './modules/settings-view.js';
 import { applyTheme, loadSettings, resetSettings, saveSettings } from './modules/settings.js';
 import { ACTIONS, MODES, PLAYBACK, createStore } from './modules/state.js';
-import { createRepository } from './modules/store.js';
+import { createId, createRepository } from './modules/store.js';
 import { createToaster } from './modules/toast.js';
-import { createZip, dedupeNames } from './modules/zip.js';
+import { crc32Blob, createZipParts, dedupeNames, estimateZipSize } from './modules/zip.js';
+import { extractZipEntry, readZipDirectory } from './modules/zip-reader.js';
 
 /** Capability probe injected into the pure MIME helpers. */
 function isTypeSupported(mimeType) {
@@ -54,12 +67,18 @@ const app = {
   plan: null,
   query: '',
   sort: 'newest',
+  /** how many matching rows the library currently renders (\"show more\" grows it) */
+  visible: LIBRARY_PAGE_SIZE,
   /** @type {Set<string>} ids selected in the library */
   selection: new Set(),
   /** @type {string|null} recording currently loaded in the preview player */
   activeId: null,
   playing: false,
   storageProtected: null,
+  /** last `navigator.storage.estimate()` result, or null when unsupported */
+  storage: null,
+  /** has the "storage almost full" toast already been shown this session? */
+  quotaWarned: false,
   /** object URL of the preview player, revoked when it changes */
   objectUrl: null,
   installPrompt: null,
@@ -78,11 +97,17 @@ let toaster;
 /** Bound translator: always reads the current locale. */
 const t = (key, params) => app.t(key, params);
 
-/** Resolve an error code to a localised message (never returns a raw key). */
+/**
+ * Resolve an error code to a localised message (never returns a raw key).
+ *
+ * Recorder errors use camelCase codes (`micDenied`) while storage errors use
+ * kebab-case (`quota-exceeded`), so both spellings are accepted.
+ */
 function errorMessage(code, message = '') {
-  const key = `errors.${code}`;
+  const raw = String(code ?? 'unknown');
+  const key = errorKeyForCode(raw);
   const text = t(key, { message });
-  return text === key ? t('errors.unknown', { message: message || code }) : text;
+  return text === key ? t('errors.unknown', { message: message || raw }) : text;
 }
 
 // ---------------------------------------------------------------- recorder ---
@@ -94,8 +119,28 @@ function currentPlan() {
 
 /** Show "Will record as …" above the timer. */
 function updateFormatHint() {
+  // While a capture is running the hint must describe *that* capture, and
+  // `app.plan` is what the save path uses: changing the preference mid-recording
+  // must not rewrite the plan of the file being recorded.
+  const { mode } = store?.getState() ?? {};
+  const capturing = mode === MODES.RECORDING || mode === MODES.PAUSED;
+  if (capturing && app.plan) return;
+
   app.plan = currentPlan();
   recorderView.setFormatHint(t('misc.formatHint', { format: app.plan.label }));
+}
+
+/**
+ * A stored format may not exist in this browser (MP3 in Firefox, OGG in Safari).
+ * Fall back to `auto` so the preferences radio, the hint and the recorder agree
+ * instead of failing on every press of the record button.
+ */
+function reconcileFormatPreference() {
+  // A browser without MediaRecorder supports no format at all: keep the
+  // preference for the next device instead of rewriting it.
+  if (!isRecordingSupported()) return;
+  if (currentPlan().supported) return;
+  app.settings = saveSettings({ format: 'auto' });
 }
 
 /** Surface a failure in the error panel when possible, else as a toast. */
@@ -199,8 +244,16 @@ async function handleFinish({ reason = '' } = {}) {
       toaster.show({ message: t('errors.noStream'), tone: 'error' });
     }
     await renderLibrary();
+    await refreshStorage();
   } catch (error) {
-    reportError(error, 'saveFailed');
+    // The microphone worked; persisting or converting failed. Drop back to a
+    // usable state and explain through a toast instead of showing the
+    // "microphone problem" panel, whose retry button starts a *new* recording.
+    store.dispatch(ACTIONS.CANCEL);
+    updateFormatHint();
+    const code = error?.code ?? 'saveFailed';
+    toaster.show({ message: errorMessage(code, error?.message ?? ''), tone: 'error' });
+    console.warn('[recorder] could not save', error);
   }
 }
 
@@ -251,8 +304,20 @@ async function togglePlayback(id) {
   }
 
   if (app.activeId !== id) {
+    /** @type {Blob|undefined} */
+    let blob;
+    try {
+      blob = await repo.blobFor(id);
+    } catch (error) {
+      toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+      return;
+    }
+    if (!blob) {
+      toaster.show({ message: t('errors.notFound'), tone: 'error' });
+      return;
+    }
     if (app.objectUrl) URL.revokeObjectURL(app.objectUrl);
-    app.objectUrl = URL.createObjectURL(record.blob);
+    app.objectUrl = URL.createObjectURL(blob);
     audio.src = app.objectUrl;
     audio.hidden = false;
     audio.setAttribute('aria-label', t('recording.preview', { name: record.name }));
@@ -284,10 +349,13 @@ function pruneSelection() {
 /** Re-render the library, its counters and the statistics block. */
 function renderLibrary() {
   pruneSelection();
-  const total = repo.all().length;
+  const matching = repo.list({ query: app.query, sort: app.sort });
+  const page = pageWindow(matching, app.visible);
   libraryView.render({
-    records: repo.list({ query: app.query, sort: app.sort }),
-    total,
+    records: page.records,
+    total: repo.all().length,
+    matching: page.total,
+    hasMore: page.hasMore,
     query: app.query,
     sort: app.sort,
     selection: app.selection,
@@ -300,14 +368,26 @@ function renderLibrary() {
 
 // ------------------------------------------------------- library: actions ---
 
-function downloadRecording(id) {
+async function downloadRecording(id) {
   const record = repo.get(id);
   if (!record) {
     toaster.show({ message: t('errors.notFound'), tone: 'error' });
     return;
   }
+  /** @type {Blob|undefined} */
+  let blob;
+  try {
+    blob = await repo.blobFor(id);
+  } catch (error) {
+    toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+    return;
+  }
+  if (!blob) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
   downloadBlob(
-    record.blob,
+    blob,
     buildFileName({
       name: sanitizeFileName(record.name),
       extension: record.extension,
@@ -323,8 +403,20 @@ async function shareRecordingById(id) {
     toaster.show({ message: t('errors.notFound'), tone: 'error' });
     return;
   }
+  /** @type {Blob|undefined} */
+  let blob;
+  try {
+    blob = await repo.blobFor(id);
+  } catch (error) {
+    toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+    return;
+  }
+  if (!blob) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
   const result = await shareRecording(
-    record.blob,
+    blob,
     buildFileName({
       name: sanitizeFileName(record.name),
       extension: record.extension,
@@ -347,9 +439,22 @@ async function trimRecording(id) {
     return;
   }
 
+  /** @type {Blob|undefined} */
+  let sourceBlob;
+  try {
+    sourceBlob = await repo.blobFor(id);
+  } catch (error) {
+    toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+    return;
+  }
+  if (!sourceBlob) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+
   let analysis;
   try {
-    analysis = await analyzeWaveform(record.blob, 240);
+    analysis = await analyzeWaveform(sourceBlob, 240);
   } catch {
     analysis = null; // waveform is optional; the sliders still work
   }
@@ -367,23 +472,20 @@ async function trimRecording(id) {
   if (!range) return;
 
   try {
-    const { blob, duration: trimmedSeconds } = await trimToWav(
-      record.blob,
-      range.startSeconds,
-      range.endSeconds,
-    );
+    const trimmed = await trimToWav(sourceBlob, range.startSeconds, range.endSeconds);
     const name = `${record.name || t('recording.untitled')} (${t('recording.trimmed')})`;
     const created = await repo.create({
-      blob,
+      blob: trimmed.blob,
       name,
       mimeType: 'audio/wav',
       extension: 'wav',
-      durationMs: Math.round(trimmedSeconds * 1000),
+      durationMs: Math.round(trimmed.duration * 1000),
       sourceId: record.id,
       trimmed: true,
     });
     toaster.show({ message: t('toast.trimmed', { name: created.name }), tone: 'success' });
     renderLibrary();
+    await refreshStorage();
   } catch (error) {
     toaster.show({
       message: t('errors.trimFailed', { message: error?.message ?? '' }),
@@ -437,6 +539,7 @@ async function deleteRecording(id) {
     });
   }
   renderLibrary();
+  await refreshStorage();
 }
 
 /** Delete every selected recording after a single confirmation. */
@@ -450,19 +553,18 @@ async function deleteSelection() {
   });
   if (!confirmed) return;
 
-  let removed = 0;
-  for (const id of ids) {
-    try {
-      await repo.remove(id);
-      removed += 1;
-    } catch {
-      /* keep going: one failure must not block the rest */
-    }
-    app.selection.delete(id);
-    if (app.activeId === id) stopPlayback();
+  let removed;
+  try {
+    removed = await repo.removeMany(ids);
+  } catch (error) {
+    toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+    return;
   }
+  for (const id of ids) app.selection.delete(id);
+  if (app.activeId && ids.includes(app.activeId)) stopPlayback();
   toaster.show({ message: t('toast.deletedAll', { count: removed }), tone: 'success' });
   renderLibrary();
+  await refreshStorage();
 }
 
 /** Wipe the whole library. */
@@ -488,11 +590,15 @@ async function clearAll() {
     });
   }
   renderLibrary();
+  await refreshStorage();
 }
+
+/** Archives above this estimated size ask for confirmation first. */
+const LARGE_EXPORT_BYTES = 512 * 1024 * 1024;
 
 /** Bundle the given recordings into a single ZIP download. */
 async function zipRecordings(records) {
-  const list = (records ?? []).filter((record) => record?.blob);
+  const list = (records ?? []).filter((record) => record?.id);
   if (list.length === 0) {
     toaster.show({ message: t('toast.noRecordings') });
     return;
@@ -508,27 +614,194 @@ async function zipRecordings(records) {
         }),
       ),
     );
+
+    // Blobs stay Blobs: the archive is assembled as parts, so a multi-gigabyte
+    // export never needs one contiguous in-memory buffer.
     const entries = [];
     for (const [index, record] of list.entries()) {
-      const data = new Uint8Array(await record.blob.arrayBuffer());
-      entries.push({ name: names[index], data });
+      const blob = await repo.blobFor(record.id);
+      if (!blob) continue; // metadata without payload: skip instead of failing
+      entries.push({
+        name: names[index],
+        source: blob,
+        // The writer derives every offset from this size, so it must describe
+        // the bytes actually written — never the (possibly stale) metadata.
+        size: blob.size,
+        crc: await crc32Blob(blob),
+      });
     }
-    const zip = createZip(entries, { date: new Date() });
+
+    if (entries.length === 0) {
+      toaster.show({ message: t('toast.noRecordings') });
+      return;
+    }
+
+    const estimated = estimateZipSize(entries);
+    if (estimated > LARGE_EXPORT_BYTES) {
+      const confirmed = await dialogs.confirm({
+        title: t('dialog.largeExportTitle'),
+        body: t('dialog.largeExportBody', { size: formatBytes(estimated) }),
+        acceptLabel: t('actions.download'),
+      });
+      if (!confirmed) return;
+    }
+
+    const { parts } = createZipParts(entries, { date: new Date() });
     downloadBlob(
-      new Blob([zip], { type: 'application/zip' }),
+      new Blob(parts, { type: 'application/zip' }),
       `audio-recordings_${timestampForFilename()}.zip`,
     );
-    toaster.show({ message: t('toast.zipped', { count: list.length }), tone: 'success' });
-  } catch {
+    toaster.show({ message: t('toast.zipped', { count: entries.length }), tone: 'success' });
+  } catch (error) {
     toaster.show({ message: t('errors.zipFailed'), tone: 'error' });
+    console.warn('[zip] failed', error);
   }
 }
 
-/** Import files the user picked, verifying each one can be decoded. */
+/** Audio formats a restored archive may contain, keyed by file extension. */
+const ARCHIVE_MIME_TYPES = {
+  wav: 'audio/wav',
+  webm: 'audio/webm',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/ogg',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  mp4: 'audio/mp4',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  aif: 'audio/aiff',
+  aiff: 'audio/aiff',
+  caf: 'audio/x-caf',
+};
+
+/** Lower-case extension of a file name (no dot), or an empty string. */
+function extensionOf(name) {
+  const match = /\.([a-z0-9]+)$/i.exec(String(name ?? '').trim());
+  return match ? match[1].toLowerCase() : '';
+}
+
+/** Is this picked file a ZIP archive rather than a single audio file? */
+function isArchive(file) {
+  const type = String(file?.type ?? '').toLowerCase();
+  return (
+    type === 'application/zip' ||
+    type === 'application/x-zip-compressed' ||
+    extensionOf(file?.name) === 'zip'
+  );
+}
+
+/**
+ * Restore recordings from a ZIP archive this app exported earlier.
+ *
+ * Every entry is checksum-verified against the central directory before it is
+ * stored, so a damaged download can never corrupt the library: bad entries are
+ * skipped (and reported) instead of aborting the whole restore. Audio that is
+ * intact but that this browser cannot decode is still restored (unknown
+ * duration) rather than thrown away.
+ *
+ * @param {Blob} file
+ * @returns {Promise<number>} how many recordings were restored
+ */
+async function importArchive(file) {
+  let entries;
+  try {
+    ({ entries } = await readZipDirectory(file));
+  } catch (error) {
+    toaster.show({
+      message: t('errors.archiveUnreadable', { message: error?.message ?? '' }),
+      tone: 'error',
+    });
+    return 0;
+  }
+
+  const candidates = entries.filter((entry) => ARCHIVE_MIME_TYPES[extensionOf(entry.name)]);
+  if (candidates.length === 0) {
+    toaster.show({ message: t('errors.archiveEmpty'), tone: 'error' });
+    return 0;
+  }
+
+  /** @type {Array<{ record: object, blob: Blob }>} */
+  const payloads = [];
+  let skipped = 0;
+
+  for (const entry of candidates) {
+    try {
+      const blob = await extractZipEntry(file, entry);
+      const checksum = await crc32Blob(blob);
+      if (checksum !== entry.crc >>> 0) {
+        skipped += 1; // corrupt payload: never store it
+        continue;
+      }
+      const mimeType = ARCHIVE_MIME_TYPES[extensionOf(entry.name)];
+      let durationMs = 0;
+      try {
+        const decoded = await decodeBlob(blob);
+        durationMs = Math.round((Number(decoded.duration) || 0) * 1000);
+      } catch (error) {
+        // Intact audio in a container this browser cannot decode: keep it so it
+        // can still be downloaded, but leave the duration unknown.
+        console.warn('[restore] duration unavailable', entry.name, error);
+      }
+      const baseName = String(entry.name).split('/').pop() ?? '';
+      payloads.push({
+        record: {
+          id: createId(),
+          name: sanitizeDisplayName(baseName.replace(/\.[^.]+$/, ''), t('recording.untitled')),
+          mimeType,
+          extension: extensionForMime(mimeType, extensionOf(entry.name)),
+          durationMs,
+          size: blob.size,
+          // Restored recordings sort as the newest, like a fresh import.
+          createdAt: Date.now(),
+        },
+        blob,
+      });
+    } catch (error) {
+      skipped += 1;
+      console.warn('[restore] skipped', entry.name, error);
+    }
+  }
+
+  if (payloads.length > 0) {
+    try {
+      await repo.restore(payloads);
+    } catch (error) {
+      // `restore()` writes in one transaction, so nothing was stored: say so
+      // instead of leaving an unhandled rejection with no feedback.
+      toaster.show({
+        message: errorMessage(
+          error?.code === 'quota-exceeded' ? 'quotaExceeded' : 'saveFailed',
+          '',
+        ),
+        tone: 'error',
+      });
+      console.warn('[restore] write failed', error);
+      return 0;
+    }
+  }
+  if (skipped > 0) {
+    toaster.show({ message: t('toast.restoreSkipped', { count: skipped }), tone: 'error' });
+  }
+  return payloads.length;
+}
+
+/**
+ * Import files the user picked: audio files are decoded and stored, ZIP
+ * archives are restored entry by entry.
+ */
 async function importFiles(files) {
   let imported = 0;
+  let restored = 0;
+
   for (const file of files ?? []) {
     if (!file || !file.size) continue;
+
+    if (isArchive(file)) {
+      restored += await importArchive(file);
+      continue;
+    }
+
     try {
       const decoded = await decodeBlob(file);
       const mimeType = file.type || 'audio/webm';
@@ -555,7 +828,13 @@ async function importFiles(files) {
 
   if (imported > 0) {
     toaster.show({ message: t('toast.imported', { count: imported }), tone: 'success' });
+  }
+  if (restored > 0) {
+    toaster.show({ message: t('toast.restored', { count: restored }), tone: 'success' });
+  }
+  if (imported + restored > 0) {
     renderLibrary();
+    await refreshStorage();
   }
 }
 
@@ -566,11 +845,19 @@ async function handleLibraryIntent(intent) {
   switch (intent?.type) {
     case 'query':
       app.query = String(intent.value ?? '');
+      app.visible = LIBRARY_PAGE_SIZE;
       renderLibrary();
       break;
     case 'sort':
-      app.sort = String(intent.value ?? 'newest');
+      // Only the documented orders are accepted, so a stale bookmark or a
+      // hand-edited DOM value can never be persisted.
+      app.sort = SORT_OPTIONS.includes(intent.value) ? intent.value : 'newest';
       app.settings = saveSettings({ sort: app.sort });
+      app.visible = LIBRARY_PAGE_SIZE;
+      renderLibrary();
+      break;
+    case 'showMore':
+      app.visible += LIBRARY_PAGE_SIZE;
       renderLibrary();
       break;
     case 'select':
@@ -627,12 +914,54 @@ async function handleLibraryIntent(intent) {
 
 // ------------------------------------------------------ settings and chrome ---
 
-/** Re-render the preferences panel, header controls and footer. */
+/** The storage model the settings view renders (memoised from `app.storage`). */
+function storageModel() {
+  if (!app.storage) return null;
+  return {
+    usage: Number(app.storage.usage) || 0,
+    quota: Number(app.storage.quota) || 0,
+    percent: storagePercent(app.storage),
+    level: storageLevel(app.storage),
+  };
+}
+
+/** Warn once per session when the origin is running out of room. */
+function maybeWarnQuota() {
+  const level = storageLevel(app.storage);
+  if (level === 'ok' || level === 'unknown') {
+    if (level === 'ok') app.quotaWarned = false;
+    return;
+  }
+  if (app.quotaWarned) return;
+  app.quotaWarned = true;
+  const percent = storagePercent(app.storage) ?? 0;
+  toaster?.show({
+    message:
+      level === 'critical'
+        ? t('toast.quotaCritical', { percent })
+        : t('toast.quotaLow', { percent }),
+    tone: level === 'critical' ? 'error' : 'info',
+  });
+}
+
+/** Re-read the browser's quota estimate and repaint the storage panel. */
+async function refreshStorage() {
+  try {
+    app.storage = await estimateStorage();
+  } catch {
+    app.storage = null;
+  }
+  renderSettings();
+  maybeWarnQuota();
+}
+
 function renderSettings() {
   if (!settingsView || !repo) return;
   settingsView.render(app.settings, {
     stats: repo.stats(),
     storageProtected: app.storageProtected,
+    storage: storageModel(),
+    topRecordings: topRecordings(repo.all(), 5),
   });
   syncHeaderControls();
   updateFooter();
@@ -711,6 +1040,7 @@ function handleSettingsReset() {
   app.settings = resetSettings();
   app.sort = app.settings.sort;
   app.query = '';
+  app.visible = LIBRARY_PAGE_SIZE;
   app.selection = new Set();
   applyTheme(app.settings.theme);
   applyLocale(preferredLocale('auto'));
@@ -735,18 +1065,14 @@ async function initStorage() {
   } catch (error) {
     const code = error?.code === 'quota-exceeded' ? 'quotaExceeded' : 'storageUnavailable';
     toaster.show({ message: errorMessage(code, error?.message ?? ''), tone: 'error' });
+    renderLibrary();
     return;
   }
 
   renderLibrary();
 
   app.storageProtected = await requestPersistentStorage();
-  renderSettings();
-
-  const estimate = await estimateStorage();
-  if (estimate?.quota && estimate.usage / estimate.quota > 0.9) {
-    toaster.show({ message: t('errors.quotaExceeded'), tone: 'error' });
-  }
+  await refreshStorage();
 }
 
 // -------------------------------------------------------------- shortcuts ---
@@ -777,10 +1103,11 @@ function handleShortcut(event) {
   const { mode } = store.getState();
   const key = event.key;
   const active = document.activeElement;
-  // Never hijack Space/Enter from a focused control (button, link, summary…).
+  // Never hijack the keys of a focused control (button, link, summary, field…):
+  // Space must toggle a checkbox and Enter must press the focused button.
   const onControl =
     active instanceof Element &&
-    Boolean(active.closest('button, a, summary, select, [role="button"]'));
+    Boolean(active.closest('button, a, summary, select, input, textarea, [role="button"]'));
 
   if (key === '?') {
     event.preventDefault();
@@ -788,7 +1115,9 @@ function handleShortcut(event) {
     return;
   }
 
-  if (key === 'r' || key === 'R' || (key === ' ' && !onControl)) {
+  if (onControl) return;
+
+  if (key === 'r' || key === 'R' || key === ' ') {
     event.preventDefault();
     if (mode === MODES.RECORDING || mode === MODES.PAUSED) handleFinish();
     else handleRequest();
@@ -806,7 +1135,7 @@ function handleShortcut(event) {
     return;
   }
 
-  if (key === 'Enter' && !onControl) {
+  if (key === 'Enter') {
     const id = focusedRowId();
     if (id) {
       event.preventDefault();
@@ -973,6 +1302,8 @@ async function init() {
 
   applyTheme(app.settings.theme);
   app.sort = app.settings.sort;
+  // A format saved on another browser may not exist here (see the helper).
+  reconcileFormatPreference();
 
   recorderView.setStatic();
   settingsView.setStatic();

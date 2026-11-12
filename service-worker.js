@@ -39,9 +39,11 @@ const SHELL_ASSETS = [
   './scripts/modules/toast.js',
   './scripts/modules/wav.js',
   './scripts/modules/zip.js',
+  './scripts/modules/zip-reader.js',
   './icons/favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

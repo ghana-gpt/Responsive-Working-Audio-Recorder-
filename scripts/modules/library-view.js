@@ -34,6 +34,12 @@ export function createLibraryView({ root = document, t, locale, canShare = false
   const selectionCount = $('#selection-count', root);
   const downloadSelectedButton = $('#download-selected-btn', root);
   const deleteSelectedButton = $('#delete-selected-btn', root);
+  const moreWrap = $('#library-more', root);
+  const moreButton = $('#library-more-btn', root);
+
+  /** Typing is debounced so a long library is not re-filtered on every keypress. */
+  const SEARCH_DEBOUNCE_MS = 120;
+  let searchTimer = null;
 
   /** @type {string|null} id of the row currently in rename mode */
   let renamingId = null;
@@ -50,8 +56,28 @@ export function createLibraryView({ root = document, t, locale, canShare = false
   clearAllButton?.addEventListener('click', () => onAction({ type: 'clearAll' }));
 
   searchInput?.addEventListener('input', () => {
+    const value = searchInput.value;
+    if (searchTimer) clearTimeout(searchTimer);
+    // Clearing the field is immediate so the list never looks stuck.
+    if (!value.trim()) {
+      searchTimer = null;
+      onAction({ type: 'query', value });
+      return;
+    }
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      onAction({ type: 'query', value });
+    }, SEARCH_DEBOUNCE_MS);
+  });
+
+  // `type="search"` also fires `search` for the clear button and Enter.
+  searchInput?.addEventListener('search', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = null;
     onAction({ type: 'query', value: searchInput.value });
   });
+
+  moreButton?.addEventListener('click', () => onAction({ type: 'showMore' }));
 
   sortSelect?.addEventListener('change', () => {
     onAction({ type: 'sort', value: sortSelect.value });
@@ -78,6 +104,7 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     }
     if (action === 'cancel-rename') {
       renamingId = null;
+      invalidate(id);
       onAction({ type: 'refresh' });
       return;
     }
@@ -102,6 +129,7 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     const nameField = form.elements.namedItem('name');
     const tagsField = form.elements.namedItem('tags');
     renamingId = null;
+    invalidate(id);
     onAction({
       type: 'rename',
       id,
@@ -270,11 +298,68 @@ export function createLibraryView({ root = document, t, locale, canShare = false
   }
 
   /**
+   * Update state-only parts of a row (playing icon, checkbox, active flag) in
+   * place. Replacing the node here would detach the very button a user is
+   * clicking whenever playback starts, pauses or ends.
+   *
+   * @param {HTMLElement} row
+   * @param {object} record
+   * @param {object} model
+   */
+  function syncRowState(row, record, model) {
+    const name = record.name || t('recording.untitled');
+    const isPlaying = model.activeId === record.id && model.playing;
+    row.dataset.active = model.activeId === record.id ? 'true' : 'false';
+
+    const checkbox = row.querySelector('[data-action="select"]');
+    if (checkbox instanceof HTMLInputElement) checkbox.checked = model.selection.has(record.id);
+
+    const playButton = row.querySelector('[data-action="play"]');
+    if (!playButton) return;
+    const label = isPlaying ? t('recording.pause', { name }) : t('recording.play', { name });
+    playButton.setAttribute('aria-label', label);
+    playButton.title = label;
+    const icon = playButton.querySelector('.btn__icon');
+    if (icon) icon.textContent = isPlaying ? '❚❚' : '▶';
+  }
+
+  /** Rows are reused across renders: id -> { element, signature }. */
+  const rows = new Map();
+
+  /**
+   * Force the next render to rebuild one row (used when leaving rename mode,
+   * because the DOM no longer matches the record it represents).
+   *
+   * @param {string} id
+   */
+  function invalidate(id) {
+    const entry = rows.get(id);
+    if (entry) entry.signature = null;
+  }
+
+  /** Cheap fingerprint of everything a row displays. */
+  function rowSignature(record, model) {
+    return JSON.stringify([
+      record.name ?? '',
+      Array.isArray(record.tags) ? record.tags : null,
+      Boolean(record.trimmed),
+      Number(record.size) || 0,
+      Number(record.durationMs) || 0,
+      Number(record.createdAt) || 0,
+      record.extension ?? '',
+      Array.isArray(record.markers) ? record.markers.length : 0,
+      model.locale ?? '',
+    ]);
+  }
+
+  /**
    * Render the whole library.
    *
    * @param {{
    *   records?: object[],
    *   total?: number,
+   *   matching?: number,
+   *   hasMore?: boolean,
    *   query?: string,
    *   sort?: string,
    *   selection?: Set<string>,
@@ -285,12 +370,13 @@ export function createLibraryView({ root = document, t, locale, canShare = false
   function render(model = {}) {
     const records = Array.isArray(model.records) ? model.records : [];
     const total = Number(model.total) || 0;
+    const matching = Number(model.matching ?? records.length) || 0;
     const selection = model.selection instanceof Set ? model.selection : new Set();
     const query = String(model.query ?? '');
     const sort = model.sort ?? 'newest';
 
-    // Do not clobber an open inline editor (it would lose the caret and text).
-    if (renamingId && records.some((record) => record.id === renamingId)) return;
+    // Drop the rename flag when its row is no longer part of the rendered set.
+    if (renamingId && !records.some((record) => record.id === renamingId)) renamingId = null;
 
     if (searchInput && searchInput.value !== query) searchInput.value = query;
     if (sortSelect) sortSelect.value = sort;
@@ -300,6 +386,13 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     if (empty) {
       empty.textContent = total === 0 ? t('library.empty') : t('library.noMatches', { query });
       setFlag(empty, 'hidden', records.length > 0);
+    }
+
+    if (moreWrap) setFlag(moreWrap, 'hidden', !model.hasMore);
+    if (moreButton && model.hasMore) {
+      moreButton.textContent = t('library.showMore', {
+        count: Math.max(0, matching - records.length),
+      });
     }
 
     setFlag(selectionBar, 'hidden', total === 0);
@@ -316,7 +409,7 @@ export function createLibraryView({ root = document, t, locale, canShare = false
       const selectedVisible = records.filter((record) => selection.has(record.id)).length;
       selectAllBox.checked = records.length > 0 && selectedVisible === records.length;
       selectAllBox.indeterminate = selectedVisible > 0 && selectedVisible < records.length;
-      selectAllBox.disabled = records.length === 0;
+      selectAllBox.disabled = matching === 0;
     }
 
     if (!list) return;
@@ -329,7 +422,43 @@ export function createLibraryView({ root = document, t, locale, canShare = false
         ? { id: activeRow.dataset.id, action: active.getAttribute('data-action') }
         : null;
 
-    list.replaceChildren(...records.map((record) => buildRow(record, { ...model, selection })));
+    // Keyed reconciliation: reuse rows whose content did not change, so a
+    // checkbox click or a "show more" never rebuilds the whole list (which
+    // would otherwise close inline editors and drop focus).
+    const rowModel = { ...model, selection };
+    const desired = new Set();
+    for (const [index, record] of records.entries()) {
+      desired.add(record.id);
+      const signature = rowSignature(record, rowModel);
+      let entry = rows.get(record.id);
+
+      if (entry && renamingId !== record.id && entry.signature !== signature) {
+        const replacement = buildRow(record, rowModel);
+        entry.element.replaceWith(replacement);
+        entry = { element: replacement, signature };
+        rows.set(record.id, entry);
+      } else if (!entry) {
+        entry = { element: buildRow(record, rowModel), signature };
+        rows.set(record.id, entry);
+      } else {
+        // Keep the rename editor's data source current.
+        entry.element.recordData = record;
+      }
+
+      // Playing/selection changes are state-only: patch the existing nodes
+      // instead of replacing them (see syncRowState).
+      syncRowState(entry.element, record, rowModel);
+
+      const node = entry.element;
+      const reference = list.children[index] ?? null;
+      if (reference !== node) list.insertBefore(node, reference);
+    }
+
+    for (const [id, entry] of rows) {
+      if (desired.has(id)) continue;
+      entry.element.remove();
+      rows.delete(id);
+    }
 
     if (focusInfo?.action) {
       const selector = `[data-id="${CSS.escape(String(focusInfo.id))}"] [data-action="${focusInfo.action}"]`;

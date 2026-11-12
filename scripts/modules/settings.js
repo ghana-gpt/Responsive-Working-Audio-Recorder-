@@ -5,6 +5,8 @@
  * entry must never put the UI into an unusable state.
  */
 
+import { SORT_OPTIONS } from './library.js';
+
 export const SETTINGS_KEY = 'audio-recorder:settings:v2';
 export const THEME_KEY = 'audio-recorder:theme';
 export const LOCALE_KEY = 'audio-recorder:locale';
@@ -52,9 +54,9 @@ export function normalizeSettings(input = {}) {
     ? Number(source.bitrate)
     : DEFAULT_SETTINGS.bitrate;
   const theme = THEMES.includes(source.theme) ? source.theme : DEFAULT_SETTINGS.theme;
-  const sort = ['newest', 'oldest', 'name', 'longest'].includes(source.sort)
-    ? source.sort
-    : DEFAULT_SETTINGS.sort;
+  // `SORT_OPTIONS` is the single source of truth: a new sort order must survive a
+  // reload instead of silently snapping back to "newest".
+  const sort = SORT_OPTIONS.includes(source.sort) ? source.sort : DEFAULT_SETTINGS.sort;
   const boolean = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
   return {
     format,
@@ -125,35 +127,4 @@ export function applyTheme(theme, doc = globalThis.document) {
     doc.documentElement.dataset.theme = next;
   }
   return next;
-}
-
-/**
- * React to OS theme changes (only relevant when the user chose "system").
- * @param {(theme: 'light'|'dark') => void} callback
- * @returns {() => void} unsubscribe
- */
-export function watchSystemTheme(callback) {
-  try {
-    const query = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!query) return () => {};
-    const handler = (event) => callback(event.matches ? 'dark' : 'light');
-    query.addEventListener('change', handler);
-    return () => query.removeEventListener('change', handler);
-  } catch {
-    return () => {};
-  }
-}
-
-/**
- * Current effective theme (resolves "system").
- * @param {'system'|'light'|'dark'} theme
- * @returns {'light'|'dark'}
- */
-export function resolveTheme(theme) {
-  if (theme === 'light' || theme === 'dark') return theme;
-  try {
-    return globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch {
-    return 'light';
-  }
 }

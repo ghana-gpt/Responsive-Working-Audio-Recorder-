@@ -707,6 +707,12 @@ input[type='range'] {
   gap: var(--space-3);
 }
 
+.library__more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-3);
+}
+
 @media (min-width: 48rem) {
   .recording-list {
     grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));

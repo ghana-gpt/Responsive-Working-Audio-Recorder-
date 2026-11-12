@@ -81,6 +81,7 @@ export function createDialogs({ root = document, t }) {
       confirmTitle.textContent = title;
       confirmBody.textContent = body;
       confirmAccept.textContent = acceptLabel ?? t('actions.delete');
+      confirmCancel.textContent = t('actions.cancel');
 
       let settled = false;
       const finish = (result) => {

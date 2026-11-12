@@ -6,6 +6,7 @@ import {
   SUPPORTED_LOCALES,
   createTranslator,
   diffKeys,
+  errorKeyForCode,
   messages,
   resolveLocale,
   t,
@@ -66,4 +67,50 @@ test('resolveLocale picks the first supported candidate', () => {
 test('no locale re-uses another language verbatim for status messages', () => {
   assert.notEqual(messages.fr['status.recording'], messages.en['status.recording']);
   assert.notEqual(messages.fr['errors.micDenied'], messages.en['errors.micDenied']);
+});
+
+test('errorKeyForCode resolves recorder and storage code spellings', () => {
+  assert.equal(errorKeyForCode('micDenied'), 'errors.micDenied');
+  assert.equal(errorKeyForCode('quota-exceeded'), 'errors.quotaExceeded');
+  assert.equal(errorKeyForCode('storage-unavailable'), 'errors.storageUnavailable');
+  assert.equal(errorKeyForCode('not-found'), 'errors.notFound');
+  assert.equal(errorKeyForCode('storage-failed'), 'errors.storageUnavailable');
+  assert.equal(errorKeyForCode('connection-closed'), 'errors.storageUnavailable');
+  assert.equal(errorKeyForCode('already-running'), 'errors.recordFailed');
+  assert.equal(errorKeyForCode(''), 'errors.unknown');
+  assert.equal(errorKeyForCode(undefined), 'errors.unknown');
+});
+
+test('every code used by the app maps to a message that exists', () => {
+  const codes = [
+    'micDenied',
+    'micNotFound',
+    'micInUse',
+    'insecureContext',
+    'unsupportedBrowser',
+    'recordFailed',
+    'saveFailed',
+    'conversionFailed',
+    'decodeFailed',
+    'shareUnavailable',
+    'zipFailed',
+    'archiveUnreadable',
+    'archiveEmpty',
+    'invalidFormat',
+    'noStream',
+    'notFound',
+    'importFailed',
+    'unsupportedFile',
+    'trimFailed',
+    'quota-exceeded',
+    'storage-unavailable',
+    'storage-failed',
+    'connection-closed',
+    'not-found',
+    'already-running',
+  ];
+  for (const code of codes) {
+    const key = errorKeyForCode(code);
+    assert.ok(key in messages[DEFAULT_LOCALE], `${code} -> ${key} is missing`);
+  }
 });

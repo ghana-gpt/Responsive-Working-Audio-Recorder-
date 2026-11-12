@@ -178,33 +178,3 @@ export async function shareRecording(blob, filename, meta = {}) {
     return 'unsupported';
   }
 }
-
-/**
- * Copy text to the clipboard with a legacy fallback.
- * @param {string} text
- * @returns {Promise<boolean>}
- */
-export async function copyText(text) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    /* fall through to the legacy path */
-  }
-  try {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.position = 'fixed';
-    area.style.opacity = '0';
-    document.body.append(area);
-    area.select();
-    const ok = document.execCommand('copy');
-    area.remove();
-    return ok;
-  } catch {
-    return false;
-  }
-}

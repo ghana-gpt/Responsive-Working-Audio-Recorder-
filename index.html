@@ -14,7 +14,7 @@
     <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; object-src 'none'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'"
     />
     <link rel="canonical" href="https://ghana-gpt.github.io/Responsive-Working-Audio-Recorder-/" />
     <link rel="manifest" href="manifest.webmanifest" />
@@ -144,7 +144,12 @@
           <p id="library-count" class="library__count" aria-live="polite"></p>
         </div>
 
-        <div class="library__toolbar" role="group" aria-label="Library tools">
+        <div
+          class="library__toolbar"
+          role="group"
+          aria-label="Library tools"
+          data-i18n-aria-label="library.toolbar"
+        >
           <div class="field field--grow">
             <label class="visually-hidden" for="search-input" data-i18n="library.search">
               Search recordings
@@ -166,6 +171,7 @@
               <option value="oldest" data-i18n="library.sortOldest">Oldest first</option>
               <option value="name" data-i18n="library.sortName">Name (A–Z)</option>
               <option value="longest" data-i18n="library.sortLongest">Longest first</option>
+              <option value="largest" data-i18n="library.sortLargest">Largest first</option>
             </select>
           </div>
           <button id="import-btn" class="btn btn--ghost btn--sm" type="button">
@@ -176,7 +182,7 @@
             id="import-input"
             class="visually-hidden"
             type="file"
-            accept="audio/*"
+            accept="audio/*,.zip,application/zip"
             multiple
             tabindex="-1"
           />
@@ -215,6 +221,10 @@
         </p>
 
         <ul id="recording-list" class="recording-list" aria-labelledby="library-heading"></ul>
+
+        <div id="library-more" class="library__more" hidden>
+          <button id="library-more-btn" class="btn btn--ghost btn--sm" type="button"></button>
+        </div>
       </section>
 
       <details id="settings-panel" class="card disclosure">
@@ -261,7 +271,25 @@
           <fieldset class="settings__group">
             <legend data-i18n="settings.stats">Local statistics</legend>
             <p id="storage-stats" class="settings__stats"></p>
-            <p id="storage-status" class="hint"></p>
+
+            <div class="storage">
+              <div class="storage__head">
+                <span data-i18n="settings.storageUsage">Space used</span>
+                <span id="storage-usage" class="storage__value"></span>
+              </div>
+              <progress
+                id="storage-meter"
+                class="storage__meter"
+                max="100"
+                value="0"
+                aria-describedby="storage-usage"
+                hidden
+              ></progress>
+              <p id="storage-status" class="hint"></p>
+
+              <h3 class="storage__title" data-i18n="settings.storageTop">Largest recordings</h3>
+              <ul id="storage-top" class="storage__list"></ul>
+            </div>
           </fieldset>
 
           <fieldset class="settings__group">
@@ -318,7 +346,11 @@
 
     <footer class="app-footer">
       <p id="footer-copy" class="app-footer__copy"></p>
-      <nav class="app-footer__links" aria-label="Project links">
+      <nav
+        class="app-footer__links"
+        aria-label="Project links"
+        data-i18n-aria-label="footer.linksLabel"
+      >
         <a
           href="https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-"
           rel="noopener noreferrer"

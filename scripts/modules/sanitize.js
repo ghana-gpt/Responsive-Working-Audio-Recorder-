@@ -98,8 +98,11 @@ export function clamp(value, min, max) {
 }
 
 /**
- * Escape a string for safe interpolation into innerHTML (defence in depth:
- * the app prefers textContent, but templates do use innerHTML in a few spots).
+ * Escape a string for safe interpolation into HTML.
+ *
+ * Defence in depth: the UI sets text with `textContent` and never assigns
+ * `innerHTML`, so nothing needs escaping today — this stays available (and
+ * tested) for any future markup that has to interpolate user text.
  *
  * @param {string} value
  * @returns {string}

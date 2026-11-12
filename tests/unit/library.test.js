@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   SORT_LONGEST,
+  SORT_LARGEST,
   SORT_NAME,
   SORT_NEWEST,
   SORT_OLDEST,
@@ -12,6 +13,7 @@ import {
   filterRecordings,
   findRecording,
   nextDefaultName,
+  pageWindow,
   sortRecordings,
 } from '../../scripts/modules/library.js';
 
@@ -59,6 +61,10 @@ test('sortRecordings supports every documented order', () => {
     ['a', 'c', 'b'],
   );
   assert.deepEqual(
+    sortRecordings(records, SORT_LARGEST).map((r) => r.id),
+    ['a', 'c', 'b'],
+  );
+  assert.deepEqual(
     sortRecordings(records, SORT_NAME).map((r) => r.id),
     ['b', 'a', 'c'],
   );
@@ -66,7 +72,8 @@ test('sortRecordings supports every documented order', () => {
     sortRecordings(records, 'unknown').map((r) => r.id),
     ['a', 'c', 'b'],
   );
-  assert.deepEqual(SORT_OPTIONS.length, 4);
+  assert.equal(SORT_OPTIONS.length, 5);
+  assert.ok(SORT_OPTIONS.includes(SORT_LARGEST));
 });
 
 test('sortRecordings does not mutate the input array', () => {
@@ -149,4 +156,49 @@ test('buildRecording rejects incomplete records', () => {
   assert.throws(() => buildRecording({ blob: new Blob(['a']) }), /requires an id/);
   assert.throws(() => buildRecording({ id: 'x' }), /requires a Blob/);
   assert.throws(() => buildRecording(undefined), /requires an id/);
+});
+
+test('pageWindow slices the first page and reports the remainder', () => {
+  const many = Array.from({ length: 125 }, (_, index) => ({ id: `r${index}` }));
+
+  const first = pageWindow(many, 0, 50);
+  assert.equal(first.records.length, 50);
+  assert.equal(first.shown, 50);
+  assert.equal(first.total, 125);
+  assert.equal(first.hasMore, true);
+  assert.equal(first.records[0].id, 'r0');
+
+  const second = pageWindow(many, 100, 50);
+  assert.equal(second.records.length, 100);
+  assert.equal(second.hasMore, true);
+
+  const last = pageWindow(many, 150, 50);
+  assert.equal(last.records.length, 125);
+  assert.equal(last.hasMore, false);
+});
+
+test('pageWindow keeps existing rows stable by rounding up to whole pages', () => {
+  const many = Array.from({ length: 10 }, (_, index) => ({ id: `r${index}` }));
+
+  const partial = pageWindow(many, 3, 4);
+  assert.equal(partial.records.length, 4, 'a partial request still yields a full page');
+
+  const extra = pageWindow(many, 9, 4);
+  assert.equal(extra.records.length, 10, 'the last page is capped at the list length');
+  assert.equal(extra.hasMore, false);
+});
+
+test('pageWindow tolerates empty input and invalid sizes', () => {
+  assert.deepEqual(pageWindow(null, 50, 50), {
+    records: [],
+    shown: 0,
+    total: 0,
+    hasMore: false,
+  });
+  assert.deepEqual(pageWindow([], 10, 0), { records: [], shown: 0, total: 0, hasMore: false });
+
+  const two = [{ id: 'a' }, { id: 'b' }];
+  const invalid = pageWindow(two, Number.NaN, 10);
+  assert.equal(invalid.records.length, 2);
+  assert.equal(invalid.hasMore, false);
 });

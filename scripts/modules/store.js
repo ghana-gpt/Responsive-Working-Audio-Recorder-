@@ -1,9 +1,13 @@
 /**
- * Recording repository: an in-memory cache in front of IndexedDB.
+ * Recording repository: a metadata cache in front of IndexedDB.
  *
- * The cache keeps the library instant to render while IndexedDB provides
- * durability. Every mutation writes through to the database first, so a failed
- * write never leaves the UI showing data that is not persisted.
+ * Audio payloads live in their own object store (`blobs`) and are only read
+ * when something actually needs the bytes (playback, download, export). The
+ * cache therefore holds small metadata objects, which keeps the library fast
+ * and memory flat no matter how many hours of audio are stored.
+ *
+ * Every mutation writes through to the database first, so a failed write never
+ * leaves the UI showing data that is not persisted.
  */
 
 import { StorageError, recordingsDb } from './db.js';
@@ -40,6 +44,16 @@ export function createId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** Keep metadata objects free of payload-sized properties. */
+function stripPayload(record) {
+  if (!record || typeof record !== 'object') return null;
+  const { blob, ...meta } = record;
+  if (!Number.isFinite(Number(meta.size)) && blob && Number.isFinite(blob.size)) {
+    meta.size = blob.size;
+  }
+  return meta;
+}
+
 /**
  * @param {{
  *   db?: typeof recordingsDb,
@@ -52,7 +66,7 @@ export function createRepository({
   now = () => Date.now(),
   idFactory = createId,
 } = {}) {
-  /** @type {object[]} */
+  /** @type {object[]} metadata only — never any audio bytes */
   let cache = [];
   let loaded = false;
 
@@ -61,10 +75,12 @@ export function createRepository({
     return cache;
   };
 
-  /** Reload everything from IndexedDB into the cache. */
+  /** Reload every recording's metadata from IndexedDB into the cache. */
   async function refresh() {
     const records = await db.getAll();
-    cache = Array.isArray(records) ? records.filter((record) => record?.blob) : [];
+    cache = (Array.isArray(records) ? records : [])
+      .map(stripPayload)
+      .filter((record) => record?.id);
     loaded = true;
     return cache.slice();
   }
@@ -76,13 +92,14 @@ export function createRepository({
    *   blob: Blob,
    *   name?: string,
    *   tags?: string[],
+   *   markers?: Array<{ atMs?: number, note?: string }>,
    *   durationMs?: number,
    *   mimeType?: string,
    *   extension?: string,
    *   sourceId?: string|null,
    *   trimmed?: boolean,
    * }} input
-   * @returns {Promise<object>} the stored record
+   * @returns {Promise<object>} the stored metadata record
    */
   async function create(input) {
     await ensureLoaded();
@@ -93,13 +110,16 @@ export function createRepository({
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    await db.put(record);
+    await db.put(record, input?.blob ?? null);
     cache = [...cache, record];
     return record;
   }
 
   /**
    * Update an existing recording (rename, retag, replace audio after trimming).
+   *
+   * Pass `blob` in the patch to replace the stored audio payload; omit it to
+   * keep the existing bytes.
    *
    * @param {string} id
    * @param {object} patch
@@ -109,14 +129,20 @@ export function createRepository({
     await ensureLoaded();
     const existing = findRecording(cache, id);
     if (!existing) throw new StorageError('not-found', `Recording ${id} does not exist`);
-    const merged = {
+    // A replaced payload defines the new size unless the caller is explicit;
+    // otherwise a trim would keep reporting the old (too large) size.
+    const replacedBlob = patch?.blob instanceof Blob ? patch.blob : null;
+    const size =
+      replacedBlob && !Number.isFinite(Number(patch?.size)) ? replacedBlob.size : patch?.size;
+    const merged = buildRecording({
       ...existing,
       ...patch,
+      ...(size !== undefined ? { size } : {}),
       id: existing.id,
       createdAt: existing.createdAt,
       updatedAt: now(),
-    };
-    await db.put(merged);
+    });
+    await db.put(merged, replacedBlob);
     cache = cache.map((record) => (record.id === id ? merged : record));
     return merged;
   }
@@ -131,6 +157,76 @@ export function createRepository({
     await db.remove(id);
     cache = cache.filter((record) => record.id !== id);
     return true;
+  }
+
+  /**
+   * Remove several recordings in a single transaction.
+   *
+   * @param {Iterable<string>} ids
+   * @returns {Promise<number>} how many were actually removed
+   */
+  async function removeMany(ids) {
+    await ensureLoaded();
+    const existing = [...new Set(ids ?? [])].filter((id) => findRecording(cache, id));
+    if (existing.length === 0) return 0;
+    await db.removeMany(existing);
+    const removed = new Set(existing);
+    cache = cache.filter((record) => !removed.has(record.id));
+    return existing.length;
+  }
+
+  /**
+   * Insert recordings restored from a backup. Rows whose id already exists get
+   * a fresh id, so a restore never silently overwrites local audio.
+   *
+   * Entries are normalised first: a manifest row without an id or without a
+   * `size` is repaired from the payload instead of aborting the whole restore,
+   * and rows that cannot be interpreted at all are skipped.
+   *
+   * @param {Array<{ record: object, blob: Blob|null }>} entries
+   * @returns {Promise<object[]>} the inserted metadata records
+   */
+  async function restore(entries) {
+    await ensureLoaded();
+    const taken = new Set(cache.map((record) => record.id));
+    const inserted = [];
+    const payloads = [];
+
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry?.record) continue;
+      const blob = entry.blob instanceof Blob ? entry.blob : null;
+      const wanted = entry.record.id ? String(entry.record.id) : '';
+      let record;
+      try {
+        record = buildRecording({
+          ...entry.record,
+          // The payload is passed through so `size` can be derived from it.
+          blob,
+          id: wanted && !taken.has(wanted) ? wanted : idFactory(),
+        });
+      } catch {
+        continue; // unusable row: skip it rather than losing the whole archive
+      }
+      taken.add(record.id);
+      inserted.push(record);
+      payloads.push({ record, blob });
+    }
+
+    if (inserted.length === 0) return [];
+    await db.putMany(payloads);
+    cache = [...cache, ...inserted];
+    return inserted;
+  }
+
+  /**
+   * The audio payload for a recording, read from IndexedDB on demand.
+   *
+   * @param {string} id
+   * @returns {Promise<Blob|null>}
+   */
+  async function blobFor(id) {
+    if (!id) return null;
+    return db.getBlob(id);
   }
 
   /** Remove every recording. */
@@ -168,6 +264,9 @@ export function createRepository({
     create,
     update,
     remove,
+    removeMany,
+    restore,
+    blobFor,
     clear,
     list,
     get,

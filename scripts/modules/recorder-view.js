@@ -9,6 +9,7 @@
 
 import { $, announce, createElement, setFlag } from './dom.js';
 import { formatDuration } from './format.js';
+import { errorKeyForCode } from './i18n.js';
 import { ACTIONS, MODES, getControls, statusKeyForMode } from './state.js';
 
 /**
@@ -36,6 +37,9 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
 
   let lastStatus = '';
   let lastTimer = '';
+  let lastMode = '';
+  /** @type {{ code: string, message: string }|null} */
+  let lastError = null;
   let meterUpdate = 0;
 
   recordButton?.addEventListener('click', () => onAction(ACTIONS.REQUEST));
@@ -71,10 +75,16 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
    */
   function render(mode, extra = {}) {
     if (panel) panel.dataset.mode = mode;
+    // Only a real mode change may announce or move focus: the same view is also
+    // re-rendered for playback and preference updates.
+    const modeChanged = mode !== lastMode;
+    lastMode = mode;
     const controls = getControls(mode);
 
     setFlag(recordButton, 'disabled', !controls.record);
-    setFlag(recordButton, 'aria-busy', controls.busy);
+    // `aria-busy` only understands the strings "true"/"false"; an empty
+    // attribute would be ignored by assistive technology.
+    if (recordButton) recordButton.setAttribute('aria-busy', controls.busy ? 'true' : 'false');
     setFlag(recordButton, 'data-recording', mode === MODES.RECORDING || mode === MODES.PAUSED);
 
     const pauseVisible = controls.pause || controls.resume;
@@ -114,19 +124,22 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
             : mode === MODES.READY
               ? t('status.ready')
               : '';
-      if (announcement) announce(liveRegion, announcement);
+      if (announcement && modeChanged) announce(liveRegion, announcement);
     }
 
     // Error panel replaces the status line for failures.
     const hasError = mode === MODES.ERROR;
+    lastError = hasError ? (extra.error ?? lastError) : null;
     setFlag(errorPanel, 'hidden', !hasError);
     if (hasError && errorMessage) {
-      const code = extra.error?.code ?? 'unknown';
-      const key = `errors.${code}`;
-      const message = t(key, { message: extra.error?.message ?? '' });
+      const code = lastError?.code ?? 'unknown';
+      const key = errorKeyForCode(code);
+      const message = t(key, { message: lastError?.message ?? '' });
       errorMessage.textContent = message === key ? t('errors.unknown', { message: code }) : message;
-      announce(liveRegion, errorMessage.textContent);
-      retryButton?.focus({ preventScroll: true });
+      if (modeChanged) {
+        announce(liveRegion, errorMessage.textContent);
+        retryButton?.focus({ preventScroll: true });
+      }
     }
 
     if (mode === MODES.IDLE || mode === MODES.READY || mode === MODES.ERROR) setLevel(0);
@@ -200,6 +213,8 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
       if (title) title.textContent = t('errors.title');
       lastStatus = '';
       lastTimer = '';
+      // Repaint the dynamic strings (status line, error message) in the new locale.
+      render(panel?.dataset.mode ?? MODES.IDLE, { error: lastError });
     },
     focusRecordButton: () => recordButton?.focus(),
   };

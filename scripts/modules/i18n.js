@@ -57,6 +57,9 @@ export const messages = {
     'library.sortOldest': 'Oldest first',
     'library.sortName': 'Name (A–Z)',
     'library.sortLongest': 'Longest first',
+    'library.sortLargest': 'Largest first',
+    'library.showMore': 'Show {count} more',
+    'library.showingCount': 'Showing {shown} of {total}',
     'library.downloadAll': 'Download all as ZIP',
     'library.clearAll': 'Delete all',
     'library.noMatches': 'No recordings match “{query}”.',
@@ -67,7 +70,7 @@ export const messages = {
     'library.downloadSelected': 'Download selected as ZIP',
     'library.deleteSelected': 'Delete selected',
     'library.import': 'Import audio files',
-    'library.importHint': 'MP3, WAV, OGG, M4A or WebM',
+    'library.importHint': 'MP3, WAV, OGG, M4A, WebM — or a ZIP backup from this app',
 
     'recording.untitled': 'Untitled recording',
     'recording.nameLabel': 'Recording name',
@@ -96,6 +99,7 @@ export const messages = {
     'actions.retry': 'Try again',
     'actions.rename': 'Rename',
     'actions.reset': 'Reset',
+    'actions.download': 'Download',
     'actions.ok': 'OK',
 
     'dialog.trimTitle': 'Trim recording',
@@ -116,6 +120,9 @@ export const messages = {
     'dialog.deleteSelectedTitle': 'Delete the selected recordings?',
     'dialog.deleteSelectedBody':
       '{count} recordings will be permanently removed from this device. This cannot be undone.',
+    'dialog.largeExportTitle': 'Build a large archive?',
+    'dialog.largeExportBody':
+      'This download is about {size}. The browser keeps the audio on this device until the save finishes, and it may take a while.',
 
     'settings.title': 'Preferences',
     'settings.format': 'Recording format',
@@ -153,6 +160,15 @@ export const messages = {
       'Storage is protected: this browser agreed to keep your recordings.',
     'settings.storageBestEffort':
       'Storage is best-effort: the browser may clear recordings when space runs low. Export important audio.',
+    'settings.storageUsage': 'Space used',
+    'settings.storageUsageValue': '{used} of {quota} ({percent}%)',
+    'settings.storageUnknown': 'This browser does not report storage usage.',
+    'settings.storageLow':
+      'Storage is almost full. Export a backup and delete recordings you no longer need.',
+    'settings.storageCritical':
+      'Storage is full. New recordings may fail until you free some space.',
+    'settings.storageTop': 'Largest recordings',
+    'settings.storageTopEmpty': 'No recordings stored yet.',
     'settings.themeHint': '“Match system” follows your operating system setting.',
 
     'shortcut.record': 'R or Space — start / stop recording',
@@ -183,8 +199,9 @@ export const messages = {
     'errors.conversionFailed': 'Could not convert the audio to WAV.',
     'errors.decodeFailed': 'Could not decode this recording for trimming.',
     'errors.shareUnavailable': 'Sharing files is not supported here. Use download instead.',
-    'errors.clipboardFailed': 'Could not copy to the clipboard.',
     'errors.zipFailed': 'Could not build the ZIP archive.',
+    'errors.archiveUnreadable': 'That ZIP archive could not be read: {message}',
+    'errors.archiveEmpty': 'That archive does not contain any audio files this app can read.',
     'errors.invalidFormat': 'That format is not available in this browser.',
     'errors.noStream': 'The microphone stream is no longer available.',
     'errors.unknown': 'Unexpected error: {message}',
@@ -202,8 +219,9 @@ export const messages = {
     'toast.updated': 'Recording updated.',
     'toast.downloaded': 'Download started.',
     'toast.zipped': 'ZIP with {count} recordings downloaded.',
+    'toast.restored': 'Restored {count} recording(s) from the archive.',
+    'toast.restoreSkipped': 'Skipped {count} file(s) that failed the integrity check.',
     'toast.shared': 'Shared “{name}”.',
-    'toast.copied': 'Copied to the clipboard.',
     'toast.trimmed': 'Trimmed copy saved as “{name}”.',
     'toast.languageChanged': 'Language set to English.',
     'toast.statsCleared': 'Statistics cleared.',
@@ -212,6 +230,9 @@ export const messages = {
     'toast.preferencesReset': 'Preferences reset.',
     'toast.imported': 'Imported {count} file(s).',
     'toast.storageProtected': 'Storage is now protected from automatic cleanup.',
+    'toast.quotaLow': 'Storage is {percent}% full — export a backup or delete old recordings.',
+    'toast.quotaCritical':
+      'Storage is {percent}% full — new recordings may fail. Export and free space now.',
 
     'misc.offlineReady': 'Ready for offline use.',
     'misc.updateReady': 'A new version is available.',
@@ -227,6 +248,7 @@ export const messages = {
     'footer.rights': '© {year} Audio Recorder — released under the MIT licence.',
     'footer.license': 'MIT licence',
     'footer.source': 'Source code',
+    'footer.linksLabel': 'Project links',
     'footer.credit': 'Sponsored by Ghana-GPT.com',
     'footer.creditLabel': 'Sponsor:',
   },
@@ -274,6 +296,9 @@ export const messages = {
     'library.sortOldest': 'Plus anciens d’abord',
     'library.sortName': 'Nom (A–Z)',
     'library.sortLongest': 'Plus longs d’abord',
+    'library.sortLargest': 'Plus volumineux d’abord',
+    'library.showMore': 'Afficher {count} de plus',
+    'library.showingCount': '{shown} sur {total} affichés',
     'library.downloadAll': 'Tout télécharger en ZIP',
     'library.clearAll': 'Tout supprimer',
     'library.noMatches': 'Aucun enregistrement ne correspond à « {query} ».',
@@ -284,7 +309,7 @@ export const messages = {
     'library.downloadSelected': 'Télécharger la sélection en ZIP',
     'library.deleteSelected': 'Supprimer la sélection',
     'library.import': 'Importer des fichiers audio',
-    'library.importHint': 'MP3, WAV, OGG, M4A ou WebM',
+    'library.importHint': 'MP3, WAV, OGG, M4A, WebM — ou une sauvegarde ZIP de cette application',
 
     'recording.untitled': 'Enregistrement sans titre',
     'recording.nameLabel': 'Nom de l’enregistrement',
@@ -313,6 +338,7 @@ export const messages = {
     'actions.retry': 'Réessayer',
     'actions.rename': 'Renommer',
     'actions.reset': 'Réinitialiser',
+    'actions.download': 'Télécharger',
     'actions.ok': 'OK',
 
     'dialog.trimTitle': 'Découper l’enregistrement',
@@ -333,6 +359,9 @@ export const messages = {
     'dialog.deleteSelectedTitle': 'Supprimer les enregistrements sélectionnés ?',
     'dialog.deleteSelectedBody':
       'Les {count} enregistrements seront définitivement supprimés de cet appareil. Cette action est irréversible.',
+    'dialog.largeExportTitle': 'Créer une archive volumineuse ?',
+    'dialog.largeExportBody':
+      'Ce téléchargement fait environ {size}. Le navigateur conserve l’audio sur cet appareil jusqu’à la fin de l’enregistrement, ce qui peut prendre du temps.',
 
     'settings.title': 'Préférences',
     'settings.format': 'Format d’enregistrement',
@@ -374,6 +403,15 @@ export const messages = {
       'Stockage protégé : ce navigateur a accepté de conserver vos enregistrements.',
     'settings.storageBestEffort':
       'Stockage au mieux : le navigateur peut effacer des enregistrements si l’espace manque. Exportez les audios importants.',
+    'settings.storageUsage': 'Espace utilisé',
+    'settings.storageUsageValue': '{used} sur {quota} ({percent} %)',
+    'settings.storageUnknown': 'Ce navigateur ne communique pas l’espace utilisé.',
+    'settings.storageLow':
+      'Le stockage est presque plein. Exportez une sauvegarde et supprimez les enregistrements inutiles.',
+    'settings.storageCritical':
+      'Le stockage est plein. Les nouveaux enregistrements risquent d’échouer tant que de l’espace n’est pas libéré.',
+    'settings.storageTop': 'Enregistrements les plus volumineux',
+    'settings.storageTopEmpty': 'Aucun enregistrement stocké pour le moment.',
     'settings.themeHint': '« Comme le système » suit le réglage de votre système.',
 
     'shortcut.record': 'R ou Espace — démarrer / arrêter',
@@ -410,8 +448,10 @@ export const messages = {
     'errors.decodeFailed': 'Impossible de décoder cet enregistrement pour le découpage.',
     'errors.shareUnavailable':
       'Le partage de fichiers n’est pas disponible ici. Utilisez le téléchargement.',
-    'errors.clipboardFailed': 'Impossible de copier dans le presse-papiers.',
     'errors.zipFailed': 'Impossible de créer l’archive ZIP.',
+    'errors.archiveUnreadable': 'Impossible de lire cette archive ZIP : {message}',
+    'errors.archiveEmpty':
+      'Cette archive ne contient aucun fichier audio lisible par cette application.',
     'errors.invalidFormat': 'Ce format n’est pas disponible dans ce navigateur.',
     'errors.noStream': 'Le flux du microphone n’est plus disponible.',
     'errors.unknown': 'Erreur inattendue : {message}',
@@ -430,8 +470,9 @@ export const messages = {
     'toast.updated': 'Enregistrement mis à jour.',
     'toast.downloaded': 'Téléchargement lancé.',
     'toast.zipped': 'ZIP de {count} enregistrements téléchargé.',
+    'toast.restored': '{count} enregistrement(s) restauré(s) depuis l’archive.',
+    'toast.restoreSkipped': '{count} fichier(s) ignoré(s) : le contrôle d’intégrité a échoué.',
     'toast.shared': '« {name} » partagé.',
-    'toast.copied': 'Copié dans le presse-papiers.',
     'toast.trimmed': 'Copie découpée enregistrée sous « {name} ».',
     'toast.languageChanged': 'Langue définie sur le français.',
     'toast.statsCleared': 'Statistiques effacées.',
@@ -440,6 +481,10 @@ export const messages = {
     'toast.preferencesReset': 'Préférences réinitialisées.',
     'toast.imported': '{count} fichier(s) importé(s).',
     'toast.storageProtected': 'Le stockage est désormais protégé du nettoyage automatique.',
+    'toast.quotaLow':
+      'Le stockage est plein à {percent} % — exportez une sauvegarde ou supprimez d’anciens enregistrements.',
+    'toast.quotaCritical':
+      'Le stockage est plein à {percent} % — les nouveaux enregistrements risquent d’échouer. Exportez et libérez de l’espace.',
 
     'misc.offlineReady': 'Prêt pour une utilisation hors ligne.',
     'misc.updateReady': 'Une nouvelle version est disponible.',
@@ -455,6 +500,7 @@ export const messages = {
     'footer.rights': '© {year} Enregistreur audio — publié sous licence MIT.',
     'footer.license': 'Licence MIT',
     'footer.source': 'Code source',
+    'footer.linksLabel': 'Liens du projet',
     'footer.credit': 'Sponsorisé par Ghana-GPT.com',
     'footer.creditLabel': 'Sponsor :',
   },
@@ -484,6 +530,35 @@ export function t(key, params = {}, locale = DEFAULT_LOCALE) {
  */
 export function createTranslator(locale = DEFAULT_LOCALE) {
   return (key, params) => t(key, params, locale);
+}
+
+/**
+ * Codes that deliberately share a message with another code.
+ * `storage-failed` and `connection-closed` are both "local storage is not
+ * usable" from the user's point of view.
+ */
+const ERROR_CODE_ALIASES = Object.freeze({
+  'storage-failed': 'storageUnavailable',
+  'connection-closed': 'storageUnavailable',
+  'already-running': 'recordFailed',
+});
+
+/**
+ * Message key for an error code.
+ *
+ * Recorder errors use camelCase codes (`micDenied`) while storage errors use
+ * kebab-case ones (`quota-exceeded`); both spellings resolve to the same
+ * catalogue entries so a quota failure never falls back to "Unexpected error".
+ *
+ * @param {string} code
+ * @returns {string} an `errors.*` key (may not exist for unknown codes)
+ */
+export function errorKeyForCode(code) {
+  const raw = String(code ?? '').trim() || 'unknown';
+  const aliased = ERROR_CODE_ALIASES[raw];
+  if (aliased) return `errors.${aliased}`;
+  const camel = raw.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+  return `errors.${camel}`;
 }
 
 /**

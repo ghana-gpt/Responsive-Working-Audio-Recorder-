@@ -45,6 +45,12 @@ const browserGlobals = {
   Request: 'readonly',
   Response: 'readonly',
   AbortController: 'readonly',
+  AbortSignal: 'readonly',
+  DOMException: 'readonly',
+  DecompressionStream: 'readonly',
+  CompressionStream: 'readonly',
+  ReadableStream: 'readonly',
+  WritableStream: 'readonly',
   TextEncoder: 'readonly',
   TextDecoder: 'readonly',
   crypto: 'readonly',
@@ -81,6 +87,9 @@ const nodeGlobals = {
   clearTimeout: 'readonly',
   performance: 'readonly',
   structuredClone: 'readonly',
+  DOMException: 'readonly',
+  DecompressionStream: 'readonly',
+  CompressionStream: 'readonly',
 };
 
 export default [

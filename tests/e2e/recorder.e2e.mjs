@@ -18,12 +18,15 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import puppeteer from 'puppeteer-core';
 
+import { LIBRARY_PAGE_SIZE } from '../../scripts/modules/library.js';
+import { encodeWav } from '../../scripts/modules/wav.js';
+import { createZip } from '../../scripts/modules/zip.js';
 import { startServer } from '../../tools/dev-server.mjs';
 
 const ARTIFACTS = join(dirname(fileURLToPath(import.meta.url)), '.artifacts');
@@ -247,6 +250,117 @@ async function main() {
       await waitForRows(0);
       const empty = await textOf('#library-empty');
       assert.match(empty, /Nothing recorded yet|No recordings match/);
+    });
+
+    await step('pages a long library and bulk deletes the selection', async () => {
+      // Real WAV fixtures imported through the file picker: no seeding shortcuts.
+      // They live under the repo because snap-confined Chromium cannot read /tmp.
+      const folder = mkdtempSync(join(ARTIFACTS, 'fixtures-'));
+      const paths = [];
+      const samples = new Float32Array(400).fill(0.25); // 50 ms at 8 kHz
+      for (let index = 0; index < LIBRARY_PAGE_SIZE + 10; index += 1) {
+        const file = join(folder, `Bulk ${String(index + 1).padStart(2, '0')}.wav`);
+        writeFileSync(file, Buffer.from(encodeWav([samples], 8000)));
+        paths.push(file);
+      }
+
+      try {
+        const input = await page.$('#import-input');
+        assert.ok(input, 'the import input exists');
+        await input.uploadFile(...paths);
+        await waitForRows(LIBRARY_PAGE_SIZE);
+        assert.equal(
+          await textOf('#library-count'),
+          `${LIBRARY_PAGE_SIZE + 10} saved`,
+          'every imported file is stored',
+        );
+        assert.match(
+          await textOf('#library-more-btn'),
+          /Show 10 more/,
+          'the first page stops at the page size',
+        );
+
+        await page.click('#library-more-btn');
+        await waitForRows(LIBRARY_PAGE_SIZE + 10);
+        assert.equal(
+          await page.$eval('#library-more', (element) => element.hasAttribute('hidden')),
+          true,
+          'the button hides once the whole library is rendered',
+        );
+
+        await page.click('#select-all');
+        await page.waitForFunction(
+          (count) =>
+            document.querySelectorAll('#recording-list [data-action="select"]:checked').length ===
+            count,
+          { timeout: 10000 },
+          LIBRARY_PAGE_SIZE + 10,
+        );
+        assert.match(await textOf('#selection-count'), /selected/i);
+
+        await page.click('#delete-selected-btn');
+        await page.waitForSelector('#confirm-dialog[open]', { timeout: 10000 });
+        await page.click('#confirm-accept');
+        await waitForRows(0);
+        assert.equal(
+          await page.$eval('#library-count', (element) => element.textContent.trim()),
+          '',
+          'the counter clears with the library',
+        );
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    });
+
+    await step('restores recordings from a ZIP backup', async () => {
+      // The archive is built by the same writer the "Download all as ZIP" flow uses.
+      const folder = mkdtempSync(join(ARTIFACTS, 'restore-'));
+      const samples = new Float32Array(400).fill(0.25); // 50 ms at 8 kHz
+      const wav = new Uint8Array(encodeWav([samples], 8000));
+      const zipPath = join(folder, 'backup.zip');
+      writeFileSync(
+        zipPath,
+        Buffer.from(
+          createZip([
+            { name: 'Restored 01.wav', data: wav },
+            { name: 'Restored 02.wav', data: wav },
+          ]),
+        ),
+      );
+
+      try {
+        const input = await page.$('#import-input');
+        assert.ok(input, 'the import input exists');
+        await input.uploadFile(zipPath);
+        await waitForRows(2);
+        assert.equal(await textOf('#library-count'), '2 saved', 'every entry is restored');
+        assert.deepEqual(
+          await page.$$eval('#recording-list .recording__name', (nodes) =>
+            nodes.map((node) => node.textContent.trim()).sort(),
+          ),
+          ['Restored 01', 'Restored 02'],
+          'entry file names become recording names',
+        );
+        assert.match(await textOf('#toast-host'), /Restored 2 recording/i);
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    });
+
+    await step('rejects a damaged archive without touching the library', async () => {
+      const folder = mkdtempSync(join(ARTIFACTS, 'damaged-'));
+      const zipPath = join(folder, 'broken.zip');
+      writeFileSync(zipPath, Buffer.from('this is definitely not a ZIP archive'));
+
+      try {
+        const input = await page.$('#import-input');
+        await input.uploadFile(zipPath);
+        await page.waitForSelector('#toast-host .toast--error', { timeout: 10000 });
+        assert.match(await textOf('#toast-host'), /could not be read/i);
+        assert.equal(await rowCount(), 2, 'the restored recordings are still there');
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
     });
 
     await step('switches language and translates the interface', async () => {

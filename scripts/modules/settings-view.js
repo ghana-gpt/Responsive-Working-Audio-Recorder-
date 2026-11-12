@@ -6,7 +6,7 @@
  * so a single place (main.js) validates and persists them.
  */
 
-import { $, createElement } from './dom.js';
+import { $, createElement, setFlag } from './dom.js';
 import { formatBytes, formatDuration } from './format.js';
 import { FORMAT_OPTIONS, formatAvailability, neverSupported } from './mime.js';
 import { BITRATES } from './settings.js';
@@ -35,6 +35,9 @@ export function createSettingsView({
   const creditBox = $('#show-credit', root);
   const statsLine = $('#storage-stats', root);
   const storageLine = $('#storage-status', root);
+  const usageLine = $('#storage-usage', root);
+  const usageMeter = $('#storage-meter', root);
+  const topList = $('#storage-top', root);
   const resetButton = $('#reset-settings-btn', root);
   const form = $('#settings-form', root);
 
@@ -118,9 +121,17 @@ export function createSettingsView({
 
   /**
    * @param {object} settings
-   * @param {{ stats?: object, storageProtected?: boolean|null }} [extra]
+   * @param {{
+   *   stats?: object,
+   *   storageProtected?: boolean|null,
+   *   storage?: { usage: number, quota: number, percent: number|null, level: string }|null,
+   *   topRecordings?: object[],
+   * }} [extra]
    */
-  function render(settings, { stats, storageProtected = null } = {}) {
+  function render(
+    settings,
+    { stats, storageProtected = null, storage = null, topRecordings = [] } = {},
+  ) {
     if (formatContainer) {
       const chosen = Array.from(formatContainer.querySelectorAll('input[name="format"]')).find(
         (input) => input.value === settings.format && !input.disabled,
@@ -152,12 +163,66 @@ export function createSettingsView({
     }
 
     if (storageLine) {
-      storageLine.textContent =
-        storageProtected === null
-          ? ''
-          : storageProtected
-            ? t('settings.storageProtected')
-            : t('settings.storageBestEffort');
+      const notes = [];
+      if (storageProtected !== null) {
+        notes.push(
+          storageProtected ? t('settings.storageProtected') : t('settings.storageBestEffort'),
+        );
+      }
+      if (storage?.level === 'critical') notes.push(t('settings.storageCritical'));
+      else if (storage?.level === 'warn') notes.push(t('settings.storageLow'));
+      storageLine.textContent = notes.join(' ');
+    }
+
+    if (usageLine) {
+      usageLine.textContent =
+        storage && storage.percent !== null
+          ? t('settings.storageUsageValue', {
+              used: formatBytes(storage.usage),
+              quota: formatBytes(storage.quota),
+              percent: storage.percent,
+            })
+          : t('settings.storageUnknown');
+    }
+
+    if (usageMeter) {
+      const known = Boolean(storage) && storage.percent !== null;
+      setFlag(usageMeter, 'hidden', !known);
+      if (known) {
+        usageMeter.value = storage.percent;
+        usageMeter.textContent = `${storage.percent}%`;
+        usageMeter.dataset.level = storage.level ?? 'ok';
+      }
+    }
+
+    if (topList) {
+      const largest = Array.isArray(topRecordings) ? topRecordings : [];
+      if (largest.length === 0) {
+        topList.replaceChildren(
+          createElement('li', {
+            class: 'storage__item storage__item--empty',
+            text: t('settings.storageTopEmpty'),
+          }),
+        );
+      } else {
+        topList.replaceChildren(
+          ...largest.map((record) =>
+            createElement('li', {
+              class: 'storage__item',
+              children: [
+                createElement('span', {
+                  class: 'storage__name',
+                  text: record.name || t('recording.untitled'),
+                }),
+                createElement('span', {
+                  class: 'storage__size',
+                  text: formatBytes(record.size),
+                }),
+              ],
+            }),
+          ),
+        );
+      }
     }
   }
 

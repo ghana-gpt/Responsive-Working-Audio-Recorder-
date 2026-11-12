@@ -25,11 +25,13 @@ export function on(target, type, handler, options) {
 /**
  * Create an element with attributes, dataset, classes and children.
  *
+ * Text is always set with `textContent`: no caller can smuggle markup into the
+ * DOM, which is why the app has no `innerHTML` sink at all.
+ *
  * @param {string} tag
  * @param {{
  *   class?: string|string[],
  *   text?: string,
- *   html?: string,
  *   dataset?: Record<string, string>,
  *   attrs?: Record<string, string|number|boolean|null|undefined>,
  *   children?: Node[],
@@ -38,13 +40,12 @@ export function on(target, type, handler, options) {
  */
 export function createElement(tag, options = {}) {
   const element = document.createElement(tag);
-  const { class: className, text, html, dataset, attrs, children } = options;
+  const { class: className, text, dataset, attrs, children } = options;
   if (className) {
     const list = Array.isArray(className) ? className : String(className).split(/\s+/);
     element.classList.add(...list.filter(Boolean));
   }
   if (text !== undefined) element.textContent = text;
-  if (html !== undefined) element.innerHTML = html;
   if (dataset) {
     for (const [key, value] of Object.entries(dataset)) element.dataset[key] = value;
   }
@@ -112,46 +113,6 @@ export function isEditableTarget(target) {
     );
   }
   return tag === 'textarea' || tag === 'select' || target.isContentEditable;
-}
-
-/**
- * Keep keyboard focus inside a dialog and close it on Escape.
- *
- * @param {HTMLElement} container
- * @param {{ onEscape?: () => void }} [options]
- * @returns {() => void} disposer
- */
-export function trapFocus(container, { onEscape } = {}) {
-  const selector =
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-  const handleKeydown = (event) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      onEscape?.();
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const focusable = $$(selector, container).filter(
-      (element) => element.offsetParent !== null || element === document.activeElement,
-    );
-    if (focusable.length === 0) {
-      event.preventDefault();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  container.addEventListener('keydown', handleKeydown);
-  return () => container.removeEventListener('keydown', handleKeydown);
 }
 
 /**
