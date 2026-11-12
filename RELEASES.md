@@ -4,6 +4,46 @@
 
 This page tracks the repository's version checkpoints. Branch links are source snapshots; GitHub Releases and tags are the preferred way to publish immutable downloadable versions. The `v1.0` branch is a snapshot of the repository state at commit `248b39907aab07830810388006d707d1a05d5c08`. The current `main` line is version **1.1.0** (referred to as v1.1 below).
 
+## v2.1.0 — planned scope
+
+**Status:** Planned; not started. The current code reports **1.1.0**, so confirm whether this feature line ships as 1.2.0 (incremental) or 2.1.0 before tagging — the scope below is unaffected by that choice. Agreed focus: local MP3 export, trustworthy microphone-processing feedback with a mic check, and progress/cancel for long conversions. MP4/AAC transcoding is deliberately excluded.
+
+### Goals
+
+| #   | Goal                                               | Current state                                                                                                                                                                                                              |
+| --- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Local in-browser MP3 encoding                      | `mime.js` lists MP3 with `requiresEncoder`; Preferences disables it with "no browser records MP3 directly". No encoder module exists.                                                                                      |
+| 2   | Microphone-processing transparency and a mic check | `recorder.start()` returns `track.getSettings()`, but `recorderView.setMicrophoneHint()` only shows sample rate/channels. Nothing reports whether echo cancellation, noise suppression or auto gain were actually applied. |
+| 3   | Progress and cancellation for long conversions     | The WAV save path (`plan.conversion === 'wav'`) and `trimToWav()` decode/encode whole recordings with no progress or cancel.                                                                                               |
+
+Details:
+
+1. **MP3** — add an opt-in encoder behind a capability check, loaded on demand so the initial shell stays small. Show conversion progress, allow cancellation, and map failures to an existing error code.
+2. **Processing status** — compare the requested constraints with `track.getSettings()` (and `getCapabilities()` where available) and show applied / not applied / unknown per toggle instead of implying success. Add a short microphone test (record, then play it back through the existing preview player) so users can verify their setup before a real take.
+3. **Conversion feedback** — introduce one progress/cancel contract shared by WAV today and MP3 later, without leaking object URLs or leaving the microphone open.
+
+### Out of scope
+
+- AAC/MP4 transcoding where the browser cannot record MP4 natively: this needs an AAC encoder plus an MP4 muxer and adds significant size and compatibility risk. Native MP4/AAC recording stays as it is.
+- Software noise suppression / echo cancellation DSP: consider it only after measuring CPU, latency, quality and licensing. Browser/OS processing remains authoritative.
+- Any promise of a specific audio quality result: the UI must describe what was applied, not guarantee an outcome.
+
+### Implementation constraints
+
+- The app is dependency-free today and the CSP allows only `script-src 'self'`. Any encoder must be vendored, served from this origin, and either precached or fetched on first use; a CDN import would break both the CSP and the "no network requests after load" claim.
+- Review the encoder licence before committing to one (LAME-based builds are typically LGPL and carry attribution/source obligations; WASM builds inflate the shell and need a precache entry). Record the choice and version in the repository.
+- Keep `mime.js` pure: extend `resolveFormat()`/`formatAvailability()` with encoder capability instead of branching in the views.
+- Every new string needs English **and** French entries; the i18n parity test enforces this.
+- Bump `VERSION` in `service-worker.js` whenever precached files change.
+
+### Exit criteria
+
+- MP3 can be selected where the browser cannot record it natively, produces a valid file (verified with `ffprobe` when available), shows progress and can be cancelled.
+- Preferences and the recorder show applied vs unsupported processing states from `getSettings()`/`getCapabilities()`, and claim nothing when the browser reports nothing.
+- WAV conversion and trimming expose progress and cancellation without leaking object URLs or holding the microphone open.
+- `npm run verify` is green with new unit tests for the encoder/progress logic and an e2e step for progress/cancel; target browsers and devices are checked manually before the release is called done.
+- `README.md` and this page are updated, and this section is marked shipped once the above is verified.
+
 ## v1.1 — current code (release pending)
 
 **Status:** The current code is version **1.1.0** in `package.json` and `service-worker.js`. The implemented v1.1 upgrades below are included, but this version has not yet been tagged or published as a GitHub Release. Open limitations are listed separately and should not be mistaken for completed work.
