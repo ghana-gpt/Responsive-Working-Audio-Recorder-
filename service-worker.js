@@ -10,7 +10,7 @@
  * Recordings never touch the cache: they live in IndexedDB and blob: URLs.
  */
 
-const VERSION = '2.0.0';
+const VERSION = '1.1.0';
 const CACHE_NAME = `audio-recorder-shell-${VERSION}`;
 
 /** Files that make up the installable app shell (all relative to the scope). */

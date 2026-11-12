@@ -2,7 +2,52 @@
 
 [![Version baseline: v1.0](https://img.shields.io/badge/baseline-v1.0-blue)](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/tree/v1.0)
 
-This page tracks the repository's version checkpoints. Branch links are source snapshots; GitHub Releases and tags are the preferred way to publish immutable downloadable versions. The current v1.0 branch is a snapshot of the repository state at commit `248b39907aab07830810388006d707d1a05d5c08`.
+This page tracks the repository's version checkpoints. Branch links are source snapshots; GitHub Releases and tags are the preferred way to publish immutable downloadable versions. The `v1.0` branch is a snapshot of the repository state at commit `248b39907aab07830810388006d707d1a05d5c08`. The current `main` line is version **1.1.0** (referred to as v1.1 below).
+
+## v1.1 — current code (release pending)
+
+**Status:** The current code is version **1.1.0** in `package.json` and `service-worker.js`. The implemented v1.1 upgrades below are included, but this version has not yet been tagged or published as a GitHub Release. Open limitations are listed separately and should not be mistaken for completed work.
+
+### Included in v1.1
+
+- **Backup and restore** — bulk ZIP export plus re-import of an archive this app produced. Every entry is CRC-verified against the central directory before it is stored; damaged entries are skipped and reported instead of aborting the restore. ZIP64 and DEFLATE archives are supported, with per-entry size limits and decompression-bomb protection.
+- **Storage visibility** — a preferences panel shows usage against the browser quota, the largest recordings and the persistent-storage state. The app requests persistent storage, warns once when the quota is low or critical, and asks for confirmation before exporting more than 512 MB.
+- **Repository rewrite** — IndexedDB schema v2 with metadata-only caching; audio payloads are fetched on demand, so the library never holds every blob in memory. Restore is atomic: a failed import leaves the cache and database untouched.
+- **Editing and playback** — 12-format capability ladder, WAV re-encoding, trim-to-a-new-recording (the original is preserved), and one shared preview player with no object-URL leaks.
+- **Interface** — English/French i18n with key-parity tests, light/dark/system themes, keyboard shortcuts, focus restoration, and the PWA install/update flow.
+- **Verification** — `npm run verify` passes: 118 unit tests, a 15-step Chromium e2e flow, and markup/manifest/service-worker/i18n validation. This is automated Chromium coverage, not verification on every browser in the support table.
+
+### Known limitations and follow-up work
+
+1. Long-audio feedback: WAV conversion and trimming still decode whole recordings, with no progress indicator or cancel action.
+2. Very large libraries: metadata is cached in full (payloads are not); paging metadata out of IndexedDB is still future work.
+3. Browser coverage: automated e2e runs in Chromium only; Firefox, Safari and iOS need manual checks per the support table in `README.md`.
+4. Publishing: run the final checks on the exact commit, create a `v1.1.0` tag, and publish the GitHub Release.
+
+### Release links
+
+- [Create the v1.1 GitHub Release](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases/new?tag=v1.1.0&title=Audio%20Recorder%20v1.1)
+- [Compare v1.0 with the current main](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/compare/v1.0...main)
+- [All published GitHub Releases](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases)
+
+## v1.1 goals — completion status
+
+The implemented features are part of v1.1. These status markers describe completion of the original goals, not whether the release has been published:
+
+| #   | Goal                                                    | Status                                                                                                                                                                                           |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Recording backup/export and restore/import validation   | ✅ Shipped — ZIP export, CRC-verified restore, damaged entries reported, ZIP64/DEFLATE support                                                                                                   |
+| 2   | Storage visibility and warnings                         | ✅ Shipped — usage/quota panel, persistent-storage request, low/critical quota warnings, large-export confirmation                                                                               |
+| 3   | Reduce large-library and large-export performance risks | ◐ Partly shipped — payloads are never cached (metadata only) and ZIP export assembles parts instead of one contiguous buffer; metadata is still loaded in full and paging it remains future work |
+| 4   | Long-audio processing feedback and resilience           | ⬜ Not shipped — WAV conversion and trimming still decode whole recordings without progress or cancellation                                                                                      |
+| 5   | Validation beyond Chromium plus documented limitations  | ⬜ Not shipped — e2e is Chromium only; Firefox/Safari/iOS checks are still manual                                                                                                                |
+
+### Suggested workflow for publishing v1.1
+
+1. Keep `package.json`, `package-lock.json`, `service-worker.js` and these notes in sync at version 1.1.0.
+2. Run `npm ci` and `npm run verify`, plus manual browser/device checks for changed audio/storage behavior.
+3. Create the `v1.1.0` tag on the final verified commit and publish the GitHub Release with notes summarizing included changes and known limitations.
+4. Keep `v1.0` available as the historical baseline. Prefer tags/releases over relying on a branch name alone for long-term versioning.
 
 ## v1.0 — baseline snapshot
 
@@ -17,7 +62,9 @@ This page tracks the repository's version checkpoints. Branch links are source s
 - English/French UI, light/dark/system themes, and accessibility-focused controls.
 - Unit tests, Chromium end-to-end testing, lint/validation, and GitHub Pages deployment workflows.
 
-### Known limitations to address before v1.1
+### Known limitations (as of the v1.0 snapshot)
+
+These describe the v1.0 snapshot. The v1.1 section above records what changed (payloads are no longer cached, ZIP export no longer needs one contiguous buffer) and what is still open.
 
 - The library loads all records into an in-memory cache; large libraries may consume significant memory.
 - WAV conversion and trimming decode and process entire recordings, which may be slow or memory intensive for long audio.
@@ -30,31 +77,3 @@ This page tracks the repository's version checkpoints. Branch links are source s
 - [Browse the v1.0 source snapshot](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/tree/v1.0)
 - [Inspect the exact v1.0 commit](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/commit/248b39907aab07830810388006d707d1a05d5c08)
 - [Create the v1.0 GitHub Release](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases/new?tag=v1.0&title=Audio%20Recorder%20v1.0)
-
-## v1.1 — planned
-
-**Status:** Work planned; not released. The `v1.1` branch is a working branch, not the final release artifact. Merge completed and tested work into `main`, then create an immutable `v1.1` tag and GitHub Release from the verified commit.
-
-### Release goals
-
-1. Add recording backup/export and restore/import validation so users can move or recover their local recordings.
-2. Improve storage visibility and warnings, including clear reporting of library size and available quota where the browser exposes it.
-3. Reduce large-library and large-export performance risks; prioritize loading metadata without retaining every audio blob in the in-memory cache, and assess streaming or chunked ZIP export.
-4. Improve long-audio processing feedback and resilience, including progress/cancellation where feasible and testing on lower-powered devices.
-5. Expand validation beyond Chromium across target browsers and mobile devices, documenting known limitations.
-
-These are planned goals, not claims that the features are already implemented. Update this section when scope is finalized and when each goal is completed.
-
-### Suggested workflow
-
-1. Develop and test changes on the `v1.1` branch; keep `main` as the stable line.
-2. Run `npm ci` and `npm run verify`, plus manual browser/device checks for changed audio/storage behavior.
-3. Review and merge the completed work into `main`.
-4. Create the `v1.1` tag on the final verified commit and publish the GitHub Release with notes summarizing shipped changes, fixes, and known limitations.
-5. Keep `v1.0` available as the historical baseline. Prefer tags/releases over relying on a branch name alone for long-term versioning.
-
-### Release links
-
-- [Browse the v1.1 work branch](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/tree/v1.1)
-- [Create the v1.1 GitHub Release after it is ready](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases/new?tag=v1.1&title=Audio%20Recorder%20v1.1)
-- [All published GitHub Releases](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases)

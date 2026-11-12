@@ -28,7 +28,7 @@ promise while fixing the engineering:
 | Recording duration includes pauses               | Elapsed time excludes paused intervals                                        |
 | One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                         |
 | English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                        |
-| Untested                                         | 80+ unit tests, HTML/service-worker validation and a real-browser e2e suite   |
+| Untested                                         | 118 unit tests, HTML/service-worker validation and a real-browser e2e suite   |
 
 ## Features
 
@@ -84,6 +84,10 @@ and ES module imports require an origin — always use the dev server or a stati
 | Firefox 90+       | ✅        | Ogg/Opus, WebM                                   |
 | Safari 15+        | ✅        | MP4/AAC; WAV export via the JS encoder           |
 | iOS Safari 15+    | ✅        | Use headphones during playback to avoid feedback |
+
+Automated end-to-end coverage currently runs in Chromium only. The Firefox, Safari and
+iOS rows describe the APIs the app targets — validate them manually before a release
+(see [`RELEASES.md`](RELEASES.md) for the current verification status).
 
 Unsupported formats are disabled in the settings panel with an explanation instead of
 silently failing, and every error is mapped to a human sentence (`errors.*` keys).
