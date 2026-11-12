@@ -65,6 +65,7 @@ const browserGlobals = {
   Node: 'readonly',
   Event: 'readonly',
   CustomEvent: 'readonly',
+  MutationObserver: 'readonly',
   HTMLElement: 'readonly',
   HTMLInputElement: 'readonly',
   HTMLSelectElement: 'readonly',
@@ -88,12 +89,14 @@ const nodeGlobals = {
   performance: 'readonly',
   structuredClone: 'readonly',
   DOMException: 'readonly',
+  AbortController: 'readonly',
+  AbortSignal: 'readonly',
   DecompressionStream: 'readonly',
   CompressionStream: 'readonly',
 };
 
 export default [
-  { ignores: ['node_modules/**', 'icons/**', 'image/**', 'coverage/**'] },
+  { ignores: ['node_modules/**', 'icons/**', 'image/**', 'coverage/**', 'vendor/**'] },
   {
     files: ['scripts/**/*.js', 'service-worker.js'],
     languageOptions: {

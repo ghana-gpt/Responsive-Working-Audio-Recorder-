@@ -8,6 +8,7 @@
 
 import {
   analyzeWaveform,
+  convertToMp3,
   convertToWav,
   decodeBlob,
   downloadBlob,
@@ -22,6 +23,8 @@ import {
   storagePercent,
 } from './modules/db.js';
 import { createDialogs } from './modules/dialogs.js';
+import { isConversionCancelled } from './modules/conversion.js';
+import { createConversionView } from './modules/conversion-view.js';
 import { $, isEditableTarget, setFlag, translateTree } from './modules/dom.js';
 import { buildFileName, formatBytes, timestampForFilename } from './modules/format.js';
 import {
@@ -33,6 +36,7 @@ import {
 import { createLibraryView } from './modules/library-view.js';
 import { LIBRARY_PAGE_SIZE, SORT_OPTIONS, pageWindow, topRecordings } from './modules/library.js';
 import { extensionForMime, resolveFormat } from './modules/mime.js';
+import { MP3_ENCODER_AVAILABLE } from './modules/mp3.js';
 import {
   buildAudioConstraints,
   createRecorder,
@@ -93,6 +97,9 @@ let libraryView;
 let settingsView;
 let dialogs;
 let toaster;
+let conversionView;
+/** @type {AbortController|null} the conversion currently on screen, if any */
+let conversionJob = null;
 
 /** Bound translator: always reads the current locale. */
 const t = (key, params) => app.t(key, params);
@@ -110,11 +117,56 @@ function errorMessage(code, message = '') {
   return text === key ? t('errors.unknown', { message: message || raw }) : text;
 }
 
+// -------------------------------------------------------------- conversion ---
+
+/**
+ * Show the progress panel and hand the caller the options `convertToWav` /
+ * `trimToWav` expect.
+ *
+ * Only one conversion may run at a time: it is CPU bound, the panel has a single
+ * cancel button, and two jobs would fight over the same live region.
+ *
+ * @param {string} labelKey i18n key describing the operation
+ * @returns {{ signal: AbortSignal, onProgress: (update: object) => void }|null}
+ */
+function beginConversion(labelKey) {
+  if (conversionJob) {
+    toaster.show({ message: t('errors.conversionBusy'), tone: 'error' });
+    return null;
+  }
+  conversionJob = new AbortController();
+  conversionView.start(labelKey);
+  return {
+    signal: conversionJob.signal,
+    onProgress: (update) => conversionView.update(update),
+  };
+}
+
+/** Hide the panel and forget the job (success, failure or cancellation). */
+function endConversion() {
+  conversionJob = null;
+  conversionView.stop();
+}
+
+/** Cancel button / page hide: the encoder stops between chunks. */
+function cancelConversion() {
+  conversionJob?.abort();
+}
+
+/**
+ * Explain a cancelled conversion: nothing was saved, and that is not an error.
+ * @param {string} [logLabel]
+ */
+function reportConversionCancelled(logLabel = 'conversion') {
+  console.info(`[${logLabel}] cancelled by user`);
+  toaster.show({ message: t('toast.conversionCancelled'), tone: 'info' });
+}
+
 // ---------------------------------------------------------------- recorder ---
 
 /** Resolve the current format preference against browser capabilities. */
 function currentPlan() {
-  return resolveFormat(app.settings.format, isTypeSupported);
+  return resolveFormat(app.settings.format, isTypeSupported, MP3_ENCODER_AVAILABLE);
 }
 
 /** Show "Will record as …" above the timer. */
@@ -177,14 +229,14 @@ async function handleRequest() {
   }
 
   if (!store.dispatch(ACTIONS.REQUEST)) return;
-  app.plan = plan;
+  app.plan = { ...plan, bitrate: app.settings.bitrate };
   recorderView.setElapsed(0);
 
   try {
     const { trackSettings } = await recorder.start({
       captureMimeType: plan.captureMimeType,
-      // WAV is encoded after capture, so a bitrate would only waste CPU.
-      bitrate: plan.conversion === 'wav' ? undefined : app.settings.bitrate,
+      // Converted formats use the selected bitrate in their encoder afterwards.
+      bitrate: plan.conversion ? undefined : app.plan.bitrate,
       constraints: buildAudioConstraints(app.settings),
     });
     store.dispatch(ACTIONS.START);
@@ -217,15 +269,41 @@ async function handleFinish({ reason = '' } = {}) {
     let outputMime = mimeType || plan.outputMimeType || 'audio/webm';
     let extension = extensionForMime(outputMime, plan.extension || 'webm');
 
-    if (plan.conversion === 'wav') {
+    if (plan.conversion === 'wav' || plan.conversion === 'mp3') {
+      const isMp3 = plan.conversion === 'mp3';
+      const job = beginConversion(isMp3 ? 'conversion.convertingMp3' : 'conversion.convertingWav');
+      if (!job) {
+        // Another conversion owns the panel; its toast already explained why.
+        store.dispatch(ACTIONS.CANCEL);
+        updateFormatHint();
+        return;
+      }
       try {
-        outputBlob = await convertToWav(blob);
-        outputMime = 'audio/wav';
-        extension = 'wav';
+        if (isMp3) {
+          outputBlob = await convertToMp3(blob, {
+            ...job,
+            bitrate: plan.bitrate ?? app.settings.bitrate,
+          });
+          outputMime = 'audio/mpeg';
+          extension = 'mp3';
+        } else {
+          outputBlob = await convertToWav(blob, job);
+          outputMime = 'audio/wav';
+          extension = 'wav';
+        }
       } catch (error) {
+        if (isConversionCancelled(error)) {
+          // The capture is gone and nothing was persisted: back to a usable state.
+          store.dispatch(ACTIONS.CANCEL);
+          updateFormatHint();
+          reportConversionCancelled('recorder');
+          return;
+        }
         throw Object.assign(new Error(error?.message ?? 'conversion failed'), {
           code: 'conversionFailed',
         });
+      } finally {
+        endConversion();
       }
     }
 
@@ -471,8 +549,11 @@ async function trimRecording(id) {
   });
   if (!range) return;
 
+  const job = beginConversion('conversion.trimmingWav');
+  if (!job) return;
+
   try {
-    const trimmed = await trimToWav(sourceBlob, range.startSeconds, range.endSeconds);
+    const trimmed = await trimToWav(sourceBlob, range.startSeconds, range.endSeconds, job);
     const name = `${record.name || t('recording.untitled')} (${t('recording.trimmed')})`;
     const created = await repo.create({
       blob: trimmed.blob,
@@ -487,10 +568,16 @@ async function trimRecording(id) {
     renderLibrary();
     await refreshStorage();
   } catch (error) {
-    toaster.show({
-      message: t('errors.trimFailed', { message: error?.message ?? '' }),
-      tone: 'error',
-    });
+    if (isConversionCancelled(error)) {
+      reportConversionCancelled('trim');
+    } else {
+      toaster.show({
+        message: t('errors.trimFailed', { message: error?.message ?? '' }),
+        tone: 'error',
+      });
+    }
+  } finally {
+    endConversion();
   }
 }
 
@@ -1016,6 +1103,7 @@ function applyLocale(locale, { announce = false } = {}) {
 
   translateTree(document, app.t);
   recorderView.relabel();
+  conversionView?.relabel();
   libraryView.setStatic();
   settingsView.setStatic();
   updateFormatHint();
@@ -1228,6 +1316,7 @@ async function init() {
   store = createStore();
   repo = createRepository();
   dialogs = createDialogs({ t });
+  conversionView = createConversionView({ t, onCancel: cancelConversion });
 
   recorderView = createRecorderView({
     t,
@@ -1242,6 +1331,7 @@ async function init() {
   settingsView = createSettingsView({
     t,
     isTypeSupported,
+    mp3EncoderAvailable: MP3_ENCODER_AVAILABLE,
     onChange: handleSettingsChange,
     onReset: handleSettingsReset,
   });
@@ -1297,7 +1387,10 @@ async function init() {
     app.installPrompt = null;
     syncHeaderControls();
   });
-  window.addEventListener('pagehide', () => recorder.cancel());
+  window.addEventListener('pagehide', () => {
+    recorder.cancel();
+    cancelConversion();
+  });
   document.addEventListener('keydown', handleShortcut);
 
   applyTheme(app.settings.theme);

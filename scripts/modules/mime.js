@@ -138,15 +138,20 @@ export function pickCaptureCandidate(formatId, isTypeSupported = neverSupported)
  * {
  *   requestedId, supported, label,
  *   captureMimeType, outputMimeType, extension,
- *   conversion: null | 'wav',
+ *   conversion: null | 'wav' | 'mp3',
  *   reason: null | 'unsupported' | 'needs-encoder' | 'no-recorder'
  * }
  *
  * @param {string} formatId one of FORMAT_OPTIONS ids
  * @param {(mimeType: string) => boolean} [isTypeSupported]
+ * @param {boolean} [mp3EncoderAvailable]
  * @returns {object}
  */
-export function resolveFormat(formatId, isTypeSupported = neverSupported) {
+export function resolveFormat(
+  formatId,
+  isTypeSupported = neverSupported,
+  mp3EncoderAvailable = false,
+) {
   const requested = FORMAT_OPTIONS.find((option) => option.id === formatId) ?? FORMAT_OPTIONS[0];
   const best = pickCaptureCandidate(null, isTypeSupported);
 
@@ -193,6 +198,18 @@ export function resolveFormat(formatId, isTypeSupported = neverSupported) {
 
   const exact = pickCaptureCandidate(requested.id, isTypeSupported);
   if (!exact) {
+    if (requested.id === 'mp3' && mp3EncoderAvailable) {
+      return {
+        requestedId: requested.id,
+        supported: true,
+        label: 'MP3',
+        captureMimeType: best.mimeType,
+        outputMimeType: 'audio/mpeg',
+        extension: 'mp3',
+        conversion: 'mp3',
+        reason: null,
+      };
+    }
     return {
       requestedId: requested.id,
       supported: false,
@@ -220,14 +237,19 @@ export function resolveFormat(formatId, isTypeSupported = neverSupported) {
 /**
  * Build the availability map used to disable unsupported options in the UI.
  * @param {(mimeType: string) => boolean} [isTypeSupported]
- * @returns {Record<string, { available: boolean, reason: string|null }>}
+ * @param {boolean} [mp3EncoderAvailable]
+ * @returns {Record<string, { available: boolean, reason: string|null, conversion: string|null }>}
  */
-export function formatAvailability(isTypeSupported = neverSupported) {
-  /** @type {Record<string, { available: boolean, reason: string|null }>} */
+export function formatAvailability(isTypeSupported = neverSupported, mp3EncoderAvailable = false) {
+  /** @type {Record<string, { available: boolean, reason: string|null, conversion: string|null }>} */
   const result = {};
   for (const option of FORMAT_OPTIONS) {
-    const resolved = resolveFormat(option.id, isTypeSupported);
-    result[option.id] = { available: resolved.supported, reason: resolved.reason };
+    const resolved = resolveFormat(option.id, isTypeSupported, mp3EncoderAvailable);
+    result[option.id] = {
+      available: resolved.supported,
+      reason: resolved.reason,
+      conversion: resolved.conversion,
+    };
   }
   return result;
 }

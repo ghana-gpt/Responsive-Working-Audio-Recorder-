@@ -10,7 +10,7 @@
  * Recordings never touch the cache: they live in IndexedDB and blob: URLs.
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.3.0';
 const CACHE_NAME = `audio-recorder-shell-${VERSION}`;
 
 /** Files that make up the installable app shell (all relative to the scope). */
@@ -21,6 +21,8 @@ const SHELL_ASSETS = [
   './styles/main.css',
   './scripts/main.js',
   './scripts/modules/audio-utils.js',
+  './scripts/modules/conversion-view.js',
+  './scripts/modules/conversion.js',
   './scripts/modules/db.js',
   './scripts/modules/dialogs.js',
   './scripts/modules/dom.js',
@@ -29,6 +31,7 @@ const SHELL_ASSETS = [
   './scripts/modules/library.js',
   './scripts/modules/library-view.js',
   './scripts/modules/mime.js',
+  './scripts/modules/mp3.js',
   './scripts/modules/recorder.js',
   './scripts/modules/recorder-view.js',
   './scripts/modules/sanitize.js',
@@ -40,6 +43,10 @@ const SHELL_ASSETS = [
   './scripts/modules/wav.js',
   './scripts/modules/zip.js',
   './scripts/modules/zip-reader.js',
+  './vendor/lamejs-1.2.1/lame.min.js',
+  './vendor/lamejs-1.2.1/LICENSE.LGPL-3.0.txt',
+  './vendor/lamejs-1.2.1/LICENSE.GPL-3.0.txt',
+  './vendor/lamejs-1.2.1/NOTICE.md',
   './icons/favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

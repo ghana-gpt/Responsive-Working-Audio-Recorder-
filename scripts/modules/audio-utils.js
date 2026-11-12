@@ -3,7 +3,9 @@
  * sharing and clipboard access.
  */
 
-import { computePeaks, encodeWav, sliceChannels } from './wav.js';
+import { createConversionTask } from './conversion.js';
+import { encodeMp3Async } from './mp3.js';
+import { computePeaks, encodeWav, encodeWavAsync, sliceChannels } from './wav.js';
 
 /** @type {AudioContext|null} */
 let sharedContext = null;
@@ -80,12 +82,73 @@ export function channelsToWavBlob(channels, sampleRate) {
 
 /**
  * Convert any supported recording to 16-bit PCM WAV.
+ *
+ * Follows the shared conversion contract (modules/conversion.js): decoding has
+ * no measurable progress, encoding reports frames written, and a signal aborts
+ * between chunks. Cancelling during decode cannot interrupt `decodeAudioData`
+ * (the platform offers no hook), so the decoded buffer is discarded the moment
+ * decoding settles.
+ *
  * @param {Blob} blob
+ * @param {{
+ *   signal?: AbortSignal|null,
+ *   onProgress?: ((progress: { stage: string, fraction: number|null }) => void)|null,
+ *   chunkFrames?: number,
+ *   yieldFn?: (() => Promise<void>)|null,
+ * }} [options]
  * @returns {Promise<Blob>}
  */
-export async function convertToWav(blob) {
-  const buffer = await decodeBlob(blob);
-  return channelsToWavBlob(extractChannels(buffer), buffer.sampleRate);
+export async function convertToWav(blob, options = {}) {
+  const task = createConversionTask(options);
+  try {
+    task.report('decode', null);
+    const buffer = await decodeBlob(blob);
+    task.throwIfCancelled();
+    const channels = extractChannels(buffer);
+    task.report('encode', 0);
+    const wav = await encodeWavAsync(channels, buffer.sampleRate, {
+      signal: task.signal,
+      onProgress: (fraction) => task.report('encode', fraction),
+      chunkFrames: options.chunkFrames,
+      yieldFn: options.yieldFn,
+    });
+    return new Blob([wav], { type: 'audio/wav' });
+  } finally {
+    task.dispose();
+  }
+}
+
+/**
+ * Convert a recorded blob to MP3 using the shared progress and cancellation
+ * contract. Decode progress is indeterminate; the encoder reports frames done.
+ *
+ * @param {Blob} blob
+ * @param {{
+ *   bitrate?: number,
+ *   signal?: AbortSignal|null,
+ *   onProgress?: ((progress: { stage: string, fraction: number|null }) => void)|null,
+ *   chunkFrames?: number,
+ *   yieldFn?: (() => Promise<void>)|null,
+ * }} [options]
+ * @returns {Promise<Blob>}
+ */
+export async function convertToMp3(blob, options = {}) {
+  const task = createConversionTask(options);
+  try {
+    task.report('decode', null);
+    const buffer = await decodeBlob(blob);
+    task.throwIfCancelled();
+    const channels = extractChannels(buffer);
+    task.report('encode', 0);
+    return await encodeMp3Async(channels, buffer.sampleRate, options.bitrate ?? 96_000, {
+      signal: task.signal,
+      onProgress: (fraction) => task.report('encode', fraction),
+      chunkFrames: options.chunkFrames,
+      yieldFn: options.yieldFn,
+    });
+  } finally {
+    task.dispose();
+  }
 }
 
 /**
@@ -107,19 +170,44 @@ export async function analyzeWaveform(blob, buckets = 240) {
 /**
  * Produce a trimmed WAV copy of a recording.
  *
+ * Same conversion contract as `convertToWav`: the decode stage is
+ * indeterminate, the encode stage reports real progress, and cancellation is
+ * honoured before any output is built.
+ *
  * @param {Blob} blob original recording
  * @param {number} startSeconds
  * @param {number} endSeconds
+ * @param {{
+ *   signal?: AbortSignal|null,
+ *   onProgress?: ((progress: { stage: string, fraction: number|null }) => void)|null,
+ *   chunkFrames?: number,
+ *   yieldFn?: (() => Promise<void>)|null,
+ * }} [options]
  * @returns {Promise<{ blob: Blob, duration: number }>}
  */
-export async function trimToWav(blob, startSeconds, endSeconds) {
-  const buffer = await decodeBlob(blob);
-  const channels = extractChannels(buffer);
-  const sliced = sliceChannels(channels, buffer.sampleRate, startSeconds, endSeconds);
-  return {
-    blob: channelsToWavBlob(sliced, buffer.sampleRate),
-    duration: sliced[0].length / buffer.sampleRate,
-  };
+export async function trimToWav(blob, startSeconds, endSeconds, options = {}) {
+  const task = createConversionTask(options);
+  try {
+    task.report('decode', null);
+    const buffer = await decodeBlob(blob);
+    task.throwIfCancelled();
+    const channels = extractChannels(buffer);
+    const sliced = sliceChannels(channels, buffer.sampleRate, startSeconds, endSeconds);
+    task.throwIfCancelled();
+    task.report('encode', 0);
+    const wav = await encodeWavAsync(sliced, buffer.sampleRate, {
+      signal: task.signal,
+      onProgress: (fraction) => task.report('encode', fraction),
+      chunkFrames: options.chunkFrames,
+      yieldFn: options.yieldFn,
+    });
+    return {
+      blob: new Blob([wav], { type: 'audio/wav' }),
+      duration: sliced[0].length / buffer.sampleRate,
+    };
+  } finally {
+    task.dispose();
+  }
 }
 
 /**

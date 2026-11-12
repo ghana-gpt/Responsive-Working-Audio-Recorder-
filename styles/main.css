@@ -407,6 +407,40 @@ a:hover {
   font-size: var(--text-sm);
 }
 
+/* ------------------------------------------------------------ conversion --- */
+
+.conversion {
+  padding: var(--space-4);
+}
+
+.conversion__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.conversion__label {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.conversion__progress {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  height: 0.6rem;
+  accent-color: var(--color-primary);
+}
+
+.conversion__percent {
+  min-width: 3.5ch;
+  text-align: right;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
 /* --------------------------------------------------------------- buttons --- */
 
 .btn {

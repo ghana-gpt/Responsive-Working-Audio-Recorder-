@@ -19,24 +19,24 @@ the microphone stream leaks after every take, downloads pile up one click at a
 time and nothing survives a reload. This rewrite keeps the "just open the page"
 promise while fixing the engineering:
 
-| Problem in the naive version                     | What this version does                                                        |
-| ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Impossible UI states (stop clickable while idle) | A typed state machine (`scripts/modules/state.js`) validates every transition |
-| Microphone stays open after stop                 | The stream and `AudioContext` are released on stop, cancel **and** `pagehide` |
-| Hard-coded `audio/webm`                          | Capability detection picks the best supported container; WAV is encoded in JS |
-| Recordings vanish on reload                      | IndexedDB repository with an in-memory cache in front                         |
-| Recording duration includes pauses               | Elapsed time excludes paused intervals                                        |
-| One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                         |
-| English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                        |
-| Untested                                         | 118 unit tests, HTML/service-worker validation and a real-browser e2e suite   |
+| Problem in the naive version                     | What this version does                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Impossible UI states (stop clickable while idle) | A typed state machine (`scripts/modules/state.js`) validates every transition          |
+| Microphone stays open after stop                 | The stream and `AudioContext` are released on stop, cancel **and** `pagehide`          |
+| Hard-coded `audio/webm`                          | Capability detection picks the best supported container; WAV and MP3 are encoded in JS |
+| Recordings vanish on reload                      | IndexedDB repository with an in-memory cache in front                                  |
+| Recording duration includes pauses               | Elapsed time excludes paused intervals                                                 |
+| One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                                  |
+| English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                                 |
+| Untested                                         | 136 unit tests, HTML/service-worker validation and a 21-step e2e suite                 |
 
 ## Features
 
 - **Recording** — start / pause / resume / stop, live input meter, elapsed timer, a
   four-container fallback ladder (`webm/opus` → `ogg/opus` → `mp4/aac` → `mp3`, eight
   candidate MIME types), a bitrate control, microphone processing toggles (echo cancellation,
-  noise suppression, auto gain), and a WAV path that captures compressed audio then re-encodes
-  16-bit PCM.
+  noise suppression, auto gain), a WAV path that captures compressed audio then re-encodes
+  16-bit PCM, and an MP3 path for browsers that cannot record MP3 natively.
 - **Library** — every take is stored in IndexedDB with a name, tags, duration and size;
   search, sort (newest / oldest / name / longest), inline rename, multi-select,
   bulk delete, "download all as ZIP", per-item download and share.
@@ -48,6 +48,17 @@ promise while fixing the engineering:
   the largest recordings and the current protection state.
 - **Trimming** — canvas waveform preview with draggable handles; the trimmed copy is
   saved as a **new** WAV recording (the original is never destroyed).
+- **Progress and cancellation** — every WAV conversion (saving a capture or a trim)
+  re-encodes in chunks so the page stays responsive, reports real encode progress in a
+  panel next to the recorder (indeterminate while decoding, which browsers cannot
+  report on) and can be cancelled mid-way: nothing is saved and the library is untouched.
+- **Local MP3 export** — pick MP3 and the capture is re-encoded on the device by a
+  vendored [lamejs](https://github.com/zhuker/lamejs) build (LGPL-3.0, see
+  [`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md)). The encoder is a
+  separate same-origin script loaded on first use and precached for offline use, so the
+  initial shell stays small; it reports through the same progress panel and honours the
+  same Cancel button as the WAV path. Where a browser can record MP3 itself, that native
+  path is used and the encoder is never downloaded.
 - **Playback** — one shared `<audio>` preview player, no object-URL leaks.
 - **Offline PWA** — precached shell, `manifest.webmanifest`, generated maskable icons,
   install prompt and "new version available" toast.
@@ -82,8 +93,8 @@ and ES module imports require an origin — always use the dev server or a stati
 | Browser           | Recording | Notes                                            |
 | ----------------- | --------- | ------------------------------------------------ |
 | Chrome / Edge 90+ | ✅        | WebM/Opus by default, MP4/AAC when available     |
-| Firefox 90+       | ✅        | Ogg/Opus, WebM                                   |
-| Safari 15+        | ✅        | MP4/AAC; WAV export via the JS encoder           |
+| Firefox 90+       | ✅        | Ogg/Opus, WebM; MP3 via the JS encoder           |
+| Safari 15+        | ✅        | MP4/AAC; WAV and MP3 export via the JS encoders  |
 | iOS Safari 15+    | ✅        | Use headphones during playback to avoid feedback |
 
 Automated end-to-end coverage currently runs in Chromium only. The Firefox, Safari and
@@ -114,6 +125,7 @@ button/link has focus, so they never steal a keystroke from an active control.
 ├── manifest.webmanifest        # PWA metadata (installable)
 ├── service-worker.js           # Offline shell cache (network-first navigations)
 ├── icons/                      # Generated SVG + PNG icons (192/512/maskable)
+├── vendor/lamejs-1.2.1/        # Vendored MP3 encoder (LGPL-3.0, see NOTICE.md)
 ├── styles/main.css             # Design tokens, layout, components, themes
 ├── scripts/
 │   ├── main.js                 # Orchestrator: state, data, wiring, shortcuts, boot
@@ -121,10 +133,13 @@ button/link has focus, so they never steal a keystroke from an active control.
 │       ├── state.js            # State machine + observable store
 │       ├── recorder.js         # MediaRecorder + Web Audio engine
 │       ├── mime.js             # Format capability ladder
+│       ├── mp3.js              # MP3 encoder adapter (vendored lamejs, chunked)
 │       ├── store.js            # Recording repository (cache + IndexedDB)
 │       ├── db.js               # IndexedDB access, storage quota helpers
 │       ├── library.js          # Pure search/sort/stats helpers
 │       ├── wav.js              # PCM encoding, trimming, peak envelope
+│       ├── conversion.js       # Shared progress/cancel contract for conversions
+│       ├── conversion-view.js  # Progress panel view (dumb)
 │       ├── audio-utils.js      # Decode, convert, download, share, clipboard
 │       ├── zip.js              # Dependency-free ZIP writer (CRC32)
 │       ├── zip-reader.js       # Streaming ZIP reader (central directory, CRC checks)
@@ -177,16 +192,21 @@ npm run verify
 ```
 
 - **Unit tests** cover the pure modules: WAV encoding (cross-checked with `ffprobe`
-  when available), ZIP writing and reading (`unzip -t`, ZIP64, CRC failures, DEFLATE
-  inflation), MIME fallbacks, search/sort/stats, sanitising, formatting, state
-  transitions and i18n key parity — plus the static dev server (MIME types, `no-store`,
-  app-shell fallback, 404s and path containment).
+  when available), the conversion contract (stage progress, cancellation, chunked
+  encoder parity with the synchronous one), the MP3 encoder adapter (mono/stereo PCM
+  conversion, frame progress, cancellation before and during encoding, input
+  validation), ZIP writing and reading (`unzip -t`, ZIP64,
+  CRC failures, DEFLATE inflation), MIME fallbacks, search/sort/stats, sanitising,
+  formatting, state transitions and i18n key parity — plus the static dev server (MIME
+  types, `no-store`, app-shell fallback, 404s and path containment).
 - **The e2e suite** boots the real app in Chromium with
   `--use-fake-device-for-media-stream`, then records, pauses, resumes, stops, reloads
   (IndexedDB persistence), renames with tags, plays, downloads, deletes, imports a long
   library, pages through it, bulk deletes, restores a ZIP backup, rejects a damaged
-  archive, switches language and theme, exercises the `?` shortcut and waits for the
-  service worker.
+  archive, watches a long trim report progress and complete, cancels a conversion from
+  the panel, saves a WAV capture, saves an MP3 capture and verifies the encoded bytes and
+  its decoded duration, switches language and theme, exercises the `?`
+  shortcut and waits for the service worker.
   Set `PUPPETEER_EXECUTABLE_PATH` if Chrome is not in a standard location and
   `E2E_STRICT=1` to fail instead of skipping when no browser is found (CI does both).
 
@@ -204,7 +224,8 @@ The app is static files — any host works (GitHub Pages, Netlify, S3, nginx).
 
 ## Privacy
 
-- No backend, no third-party scripts, no fonts, no telemetry.
+- No backend, no third-party requests, no fonts, no telemetry. The only third-party
+  code is the MP3 encoder, vendored and served from this origin (never a CDN).
 - The Content-Security-Policy allows only same-origin resources (`script-src 'self'`,
   `connect-src 'self'`), so an injected tracker could not phone home either.
 - Recordings live in IndexedDB on your device; object URLs are revoked after use.
@@ -225,7 +246,15 @@ Issues and pull requests are welcome — please read
 - Sponsored by [Ghana-GPT.com](https://ghana-gpt.com) — a static footer credit that you
   can turn off in Preferences.
 - Icons are drawn by `tools/generate-icons.mjs`; no icon library is bundled.
+- MP3 encoding: [lamejs](https://github.com/zhuker/lamejs) 1.2.1 by Alex Zhukov, a port
+  of LAME, vendored unmodified — see
+  [`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md).
 
 ## Licence
 
-[MIT](LICENSE) © 2026 Imoro Abubakari.
+This application's own code is [MIT](LICENSE) © 2026 Imoro Abubakari.
+
+Third-party components keep their own licences: the bundled MP3 encoder (lamejs) is
+**LGPL-3.0**, not MIT. It is loaded as a separate script, shipped unmodified together
+with its sources, and attributed in the app footer — the obligations are spelled out in
+[`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md).

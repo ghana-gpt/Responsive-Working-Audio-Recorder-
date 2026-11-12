@@ -16,6 +16,7 @@ import { BITRATES } from './settings.js';
  *   root?: Document|HTMLElement,
  *   t: (key: string, params?: object) => string,
  *   isTypeSupported?: (mimeType: string) => boolean,
+ *   mp3EncoderAvailable?: boolean,
  *   onChange: (patch: object) => void,
  *   onReset: () => void,
  * }} options
@@ -24,6 +25,7 @@ export function createSettingsView({
   root = document,
   t,
   isTypeSupported = neverSupported,
+  mp3EncoderAvailable = false,
   onChange,
   onReset,
 }) {
@@ -82,15 +84,18 @@ export function createSettingsView({
     }
 
     if (!formatContainer) return;
-    const availability = formatAvailability(isTypeSupported);
+    const availability = formatAvailability(isTypeSupported, mp3EncoderAvailable);
     const radios = FORMAT_OPTIONS.map((option) => {
-      const info = availability[option.id] ?? { available: false, reason: 'unsupported' };
+      const info = availability[option.id] ?? {
+        available: false,
+        reason: 'unsupported',
+        conversion: null,
+      };
       const input = createElement('input', {
         attrs: {
           type: 'radio',
           name: 'format',
           value: option.id,
-          'aria-describedby': `format-note-${option.id}`,
         },
       });
       if (!info.available) input.disabled = true;
@@ -107,7 +112,14 @@ export function createSettingsView({
           text: t(noteKey),
           attrs: { id: `format-note-${option.id}` },
         });
+      } else if (option.id === 'mp3') {
+        note = createElement('span', {
+          class: 'radio__note',
+          text: t('settings.formatMp3Local'),
+          attrs: { id: `format-note-${option.id}` },
+        });
       }
+      if (note) input.setAttribute('aria-describedby', `format-note-${option.id}`);
 
       const label = createElement('label', {
         class: 'radio',

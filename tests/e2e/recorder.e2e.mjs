@@ -158,6 +158,36 @@ async function main() {
         count,
       );
 
+    /**
+     * Record every change to the conversion panel, including ones that flash by
+     * faster than a poll could see. Setting `__conversionAutoCancel` makes the
+     * observer press Cancel the moment the panel appears.
+     */
+    const watchConversionPanel = () =>
+      page.evaluate(() => {
+        const panel = document.querySelector('#conversion-panel');
+        window.__conversion = [];
+        window.__conversionAutoCancel = false;
+        window.__conversionObserver?.disconnect();
+        window.__conversionObserver = new MutationObserver(() => {
+          const bar = document.querySelector('#conversion-progress');
+          const shown = panel.hasAttribute('hidden') === false;
+          window.__conversion.push({
+            shown,
+            label: document.querySelector('#conversion-label')?.textContent ?? '',
+            fraction: bar?.hasAttribute('value') ? Number(bar.value) : null,
+          });
+          if (shown && window.__conversionAutoCancel) {
+            document.querySelector('#conversion-cancel-btn')?.click();
+          }
+        });
+        window.__conversionObserver.observe(panel, {
+          attributes: true,
+          subtree: true,
+          attributeFilter: ['hidden', 'value'],
+        });
+      });
+
     await step('loads without JavaScript errors', async () => {
       await page.goto(`${origin}/index.html`, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('#record-btn', { visible: true });
@@ -380,6 +410,286 @@ async function main() {
       } finally {
         rmSync(folder, { recursive: true, force: true });
       }
+    });
+
+    await step('reports progress while trimming a long recording', async () => {
+      // 30 s at 8 kHz: long enough for the encoder to paint several frames.
+      const folder = mkdtempSync(join(ARTIFACTS, 'conversion-'));
+      const samples = new Float32Array(30 * 8000).fill(0.25);
+      const file = join(folder, 'Long take.wav');
+      writeFileSync(file, Buffer.from(encodeWav([samples], 8000)));
+
+      try {
+        const input = await page.$('#import-input');
+        await input.uploadFile(file);
+        await waitForRows(3);
+        await watchConversionPanel();
+
+        await page.click('#recording-list .recording [data-action="trim"]');
+        await page.waitForSelector('#trim-dialog[open]', { timeout: 20000 });
+        await page.click('#trim-apply');
+        // Emitted only after the trimmed copy is stored, so it also proves the
+        // conversion finished rather than being cancelled.
+        await page.waitForFunction(
+          () =>
+            /Trimmed copy saved/i.test(document.querySelector('#toast-host')?.textContent ?? ''),
+          { timeout: 60000 },
+        );
+        await waitForRows(4);
+
+        const log = await page.evaluate(() => window.__conversion);
+        const shown = log.filter((entry) => entry.shown);
+        assert.ok(shown.length > 0, 'the progress panel was shown');
+        assert.match(shown[0].label, /Trimming/i, 'the label names the operation');
+        assert.ok(
+          shown.some((entry) => entry.fraction !== null && entry.fraction > 0),
+          'real progress was painted, not just a spinner',
+        );
+        assert.equal(
+          await page.$eval('#conversion-panel', (panel) => panel.hasAttribute('hidden')),
+          true,
+          'the panel hides again once the conversion ends',
+        );
+        assert.equal(log.at(-1).shown, false, 'the last observed state is hidden');
+      } finally {
+        rmSync(folder, { recursive: true, force: true });
+      }
+    });
+
+    await step('cancels a conversion from the progress panel', async () => {
+      await page.evaluate(() => {
+        window.__conversionAutoCancel = true;
+      });
+      const before = await rowCount();
+
+      await page.click('#recording-list .recording [data-action="trim"]');
+      await page.waitForSelector('#trim-dialog[open]', { timeout: 20000 });
+      await page.click('#trim-apply');
+      await page.waitForFunction(
+        () =>
+          /Conversion cancelled/i.test(document.querySelector('#toast-host')?.textContent ?? ''),
+        { timeout: 60000 },
+      );
+      await page.evaluate(() => {
+        window.__conversionAutoCancel = false;
+      });
+
+      assert.equal(await rowCount(), before, 'a cancelled conversion saves nothing');
+      assert.match(
+        await textOf('#toast-host'),
+        /nothing was saved/i,
+        'the toast explains that nothing was stored',
+      );
+      assert.equal(
+        await page.$eval('#conversion-panel', (panel) => panel.hasAttribute('hidden')),
+        true,
+        'the panel closes after cancelling',
+      );
+      const shown = await page.evaluate(() => window.__conversion.filter((e) => e.shown));
+      assert.ok(shown.length > 0, 'the panel really was open before cancelling');
+      assert.match(shown[0].label, /Trimming/i);
+    });
+
+    await step('saves a WAV capture through the conversion panel', async () => {
+      // `.click()` in the page realm: the radios live in a closed <details>, so a
+      // synthetic mouse click has no reliable box to aim at.
+      await page.$eval('#format-options input[name="format"][value="wav"]', (input) =>
+        input.click(),
+      );
+      await page.waitForFunction(
+        () =>
+          document.querySelector('#format-options input[name="format"][value="wav"]')?.checked ===
+          true,
+        { timeout: 10000 },
+      );
+      await watchConversionPanel();
+
+      await page.click('#record-btn');
+      await waitForMode('recording');
+      await pause(900);
+      await page.click('#stop-btn');
+      await waitForMode('ready');
+      await waitForRows(5);
+
+      const meta = await textOf('#recording-list .recording__meta');
+      assert.match(meta, /WAV/, `the saved row is a WAV (meta: “${meta}”)`);
+
+      const shown = await page.evaluate(() => window.__conversion.filter((e) => e.shown));
+      assert.ok(shown.length > 0, 'the progress panel covered the WAV conversion');
+      assert.match(shown[0].label, /Converting to WAV/i);
+
+      // Leave the automatic format behind for the remaining steps.
+      await page.$eval('#format-options input[name="format"][value="auto"]', (input) =>
+        input.click(),
+      );
+    });
+
+    await step('saves an MP3 capture through the local encoder', async () => {
+      // No browser records MP3 natively, so this radio can only be enabled
+      // because the vendored lamejs build is served from this origin.
+      const mp3Radio = '#format-options input[name="format"][value="mp3"]';
+      assert.equal(
+        await page.$eval(mp3Radio, (input) => !input.disabled),
+        true,
+        'the vendored encoder makes MP3 selectable',
+      );
+
+      await page.$eval(mp3Radio, (input) => input.click());
+      await page.waitForFunction(
+        (selector) => document.querySelector(selector)?.checked === true,
+        { timeout: 10000 },
+        mp3Radio,
+      );
+      await watchConversionPanel();
+
+      await page.click('#record-btn');
+      await waitForMode('recording');
+      await pause(900);
+      await page.click('#stop-btn');
+      await waitForMode('ready');
+      await waitForRows(6);
+
+      const meta = await textOf('#recording-list .recording__meta');
+      assert.match(meta, /MP3/, `the saved row is an MP3 (meta: “${meta}”)`);
+
+      const shown = await page.evaluate(() => window.__conversion.filter((entry) => entry.shown));
+      assert.ok(shown.length > 0, 'the progress panel covered the MP3 conversion');
+      assert.match(shown[0].label, /Encoding to MP3/i);
+
+      // The payload must really be MP3, not a renamed WebM. Play it through the
+      // shared preview player (the browser has to decode it) and then read the
+      // stored bytes straight from IndexedDB: `fetch()` on a blob: URL is
+      // blocked by the app's own `connect-src 'self'` policy.
+      await page.click('#recording-list .recording [data-action="play"]');
+      await page.waitForFunction(
+        () => {
+          const audio = document.querySelector('#preview-audio');
+          return Boolean(audio?.src) && audio.readyState >= 2;
+        },
+        { timeout: 20000 },
+      );
+
+      const payload = await page.evaluate(async () => {
+        const open = indexedDB.open('audio-recorder');
+        const db = await new Promise((resolve, reject) => {
+          open.onsuccess = () => resolve(open.result);
+          open.onerror = () => reject(open.error);
+        });
+        const request = (store, method, key) =>
+          new Promise((resolve, reject) => {
+            const source = db.transaction(store).objectStore(store);
+            const pending = key === undefined ? source[method]() : source[method](key);
+            pending.onsuccess = () => resolve(pending.result);
+            pending.onerror = () => reject(pending.error);
+          });
+
+        try {
+          const records = await request('recordings', 'getAll');
+          const record = records.find((entry) => entry.mimeType === 'audio/mpeg');
+          if (!record) return null;
+          const stored = await request('blobs', 'get', record.id);
+          const bytes = new Uint8Array(await stored.blob.arrayBuffer());
+
+          // Count MPEG frame sync words: a renamed container would not have any.
+          let frames = 0;
+          for (let index = 0; index + 1 < bytes.length; index += 1) {
+            if (bytes[index] === 0xff && (bytes[index + 1] & 0xe0) === 0xe0) frames += 1;
+          }
+
+          const audio = document.querySelector('#preview-audio');
+          return {
+            name: record.name,
+            extension: record.extension,
+            type: stored.blob.type,
+            size: stored.blob.size,
+            head: Array.from(bytes.subarray(0, 3)),
+            frames,
+            decoded: audio.error === null && audio.readyState >= 2,
+            duration: audio.duration,
+          };
+        } finally {
+          db.close();
+        }
+      });
+
+      assert.ok(payload, 'the MP3 recording is stored in IndexedDB');
+      assert.equal(payload.extension, 'mp3', 'the metadata extension is mp3');
+      assert.equal(payload.type, 'audio/mpeg', 'the stored blob keeps its MP3 type');
+      assert.ok(payload.size > 1000, `the encoder produced audio (${payload.size} bytes)`);
+      assert.equal(payload.decoded, true, 'the browser decoded the stored file');
+      // Either an ID3v2 tag or a bare MPEG frame sync: both are valid MP3 starts.
+      const [first, second, third] = payload.head;
+      const looksLikeMp3 =
+        (first === 0x49 && second === 0x44 && third === 0x33) || // "ID3"
+        (first === 0xff && (second & 0xe0) === 0xe0); // frame sync
+      assert.equal(
+        looksLikeMp3,
+        true,
+        `MP3 header bytes: ${payload.head.map((byte) => byte.toString(16)).join(' ')}`,
+      );
+      assert.ok(payload.frames > 5, `the payload holds MPEG frames (${payload.frames} found)`);
+      if (Number.isFinite(payload.duration)) {
+        assert.ok(
+          payload.duration > 0.3 && payload.duration < 5,
+          `the MP3 decodes to a plausible duration (${payload.duration} s)`,
+        );
+      }
+
+      // Leave the automatic format behind for the remaining steps.
+      await page.$eval('#format-options input[name="format"][value="auto"]', (input) =>
+        input.click(),
+      );
+    });
+
+    await step('cancels an MP3 capture without saving it', async () => {
+      const mp3Radio = '#format-options input[name="format"][value="mp3"]';
+      await page.$eval(mp3Radio, (input) => input.click());
+      await page.waitForFunction(
+        (selector) => document.querySelector(selector)?.checked === true,
+        { timeout: 10000 },
+        mp3Radio,
+      );
+      await watchConversionPanel();
+      await page.evaluate(() => {
+        window.__conversionAutoCancel = true;
+      });
+
+      const before = await rowCount();
+      const previousToast = await textOf('#toast-host');
+
+      await page.click('#record-btn');
+      await waitForMode('recording');
+      await pause(900);
+      await page.click('#stop-btn');
+
+      // Wait for a *new* toast: an older one may still be on screen.
+      await page.waitForFunction(
+        (earlier) => {
+          const text = document.querySelector('#toast-host')?.textContent ?? '';
+          return text !== earlier && /Conversion cancelled/i.test(text);
+        },
+        { timeout: 60000 },
+        previousToast,
+      );
+      await page.evaluate(() => {
+        window.__conversionAutoCancel = false;
+      });
+
+      assert.equal(await rowCount(), before, 'a cancelled MP3 conversion saves nothing');
+      assert.match(await textOf('#toast-host'), /nothing was saved/i);
+      assert.equal(
+        await page.$eval('#conversion-panel', (panel) => panel.hasAttribute('hidden')),
+        true,
+        'the panel closes after cancelling',
+      );
+      const shown = await page.evaluate(() => window.__conversion.filter((entry) => entry.shown));
+      assert.ok(shown.length > 0, 'the panel really was open before cancelling');
+      assert.match(shown[0].label, /Encoding to MP3/i);
+
+      // Leave the automatic format behind for the remaining steps.
+      await page.$eval('#format-options input[name="format"][value="auto"]', (input) =>
+        input.click(),
+      );
     });
 
     await step('switches language and translates the interface', async () => {

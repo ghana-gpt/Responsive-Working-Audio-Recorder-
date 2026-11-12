@@ -135,6 +135,7 @@ export const messages = {
     'settings.formatHint': 'Only formats your browser can produce are enabled.',
     'settings.formatUnavailable': 'not supported by this browser',
     'settings.formatNeedsEncoder': 'no browser records MP3 directly',
+    'settings.formatMp3Local': 'encoded locally when native MP3 recording is unavailable',
     'settings.quality': 'Audio quality',
     'settings.qualityHint': 'Bitrate for compressed formats. WAV always uses 16-bit PCM.',
     'settings.quality32': '32 kbps (speech)',
@@ -197,7 +198,7 @@ export const messages = {
     'errors.saveFailed': 'Could not save the recording: {message}',
     'errors.storageUnavailable': 'Local storage is unavailable, so recordings cannot be saved.',
     'errors.quotaExceeded': 'Not enough local storage left. Delete older recordings and try again.',
-    'errors.conversionFailed': 'Could not convert the audio to WAV.',
+    'errors.conversionFailed': 'Could not convert the audio.',
     'errors.decodeFailed': 'Could not decode this recording for trimming.',
     'errors.shareUnavailable': 'Sharing files is not supported here. Use download instead.',
     'errors.zipFailed': 'Could not build the ZIP archive.',
@@ -213,6 +214,8 @@ export const messages = {
     'errors.importFailed': 'Could not import “{name}”: {message}',
     'errors.unsupportedFile': '“{name}” is not an audio file this browser can decode.',
     'errors.trimFailed': 'Could not trim the recording: {message}',
+    'errors.conversionBusy':
+      'Another conversion is already running. Wait for it to finish, then try again.',
 
     'toast.saved': 'Saved “{name}”.',
     'toast.deleted': 'Deleted “{name}”.',
@@ -224,6 +227,7 @@ export const messages = {
     'toast.restoreSkipped': 'Skipped {count} file(s) that failed the integrity check.',
     'toast.shared': 'Shared “{name}”.',
     'toast.trimmed': 'Trimmed copy saved as “{name}”.',
+    'toast.conversionCancelled': 'Conversion cancelled — nothing was saved.',
     'toast.languageChanged': 'Language set to English.',
     'toast.statsCleared': 'Statistics cleared.',
     'toast.noRecordings': 'There are no recordings to export yet.',
@@ -234,6 +238,11 @@ export const messages = {
     'toast.quotaLow': 'Storage is {percent}% full — export a backup or delete old recordings.',
     'toast.quotaCritical':
       'Storage is {percent}% full — new recordings may fail. Export and free space now.',
+
+    'conversion.heading': 'Audio conversion',
+    'conversion.convertingWav': 'Converting to WAV…',
+    'conversion.convertingMp3': 'Encoding to MP3…',
+    'conversion.trimmingWav': 'Trimming audio…',
 
     'misc.offlineReady': 'Ready for offline use.',
     'misc.updateReady': 'A new version is available.',
@@ -248,6 +257,7 @@ export const messages = {
 
     'footer.rights': '© {year} Audio Recorder — released under the MIT licence.',
     'footer.license': 'MIT licence',
+    'footer.encoderLicense': 'MP3 encoder: lamejs 1.2.1 (LGPL-3.0)',
     'footer.source': 'Source code',
     'footer.linksLabel': 'Project links',
     'footer.credit': 'Sponsored by Ghana-GPT.com',
@@ -375,6 +385,7 @@ export const messages = {
     'settings.formatHint': 'Seuls les formats pris en charge par votre navigateur sont activés.',
     'settings.formatUnavailable': 'non pris en charge par ce navigateur',
     'settings.formatNeedsEncoder': 'aucun navigateur n’enregistre directement en MP3',
+    'settings.formatMp3Local': 'encodé localement si le navigateur ne peut pas enregistrer en MP3',
     'settings.quality': 'Qualité audio',
     'settings.qualityHint':
       'Débit pour les formats compressés. Le WAV utilise toujours du PCM 16 bits.',
@@ -446,7 +457,7 @@ export const messages = {
       'Le stockage local est indisponible : les enregistrements ne peuvent pas être sauvegardés.',
     'errors.quotaExceeded':
       'Espace de stockage local insuffisant. Supprimez d’anciens enregistrements puis réessayez.',
-    'errors.conversionFailed': 'Impossible de convertir l’audio en WAV.',
+    'errors.conversionFailed': 'Impossible de convertir l’audio.',
     'errors.decodeFailed': 'Impossible de décoder cet enregistrement pour le découpage.',
     'errors.shareUnavailable':
       'Le partage de fichiers n’est pas disponible ici. Utilisez le téléchargement.',
@@ -465,6 +476,8 @@ export const messages = {
     'errors.unsupportedFile':
       '« {name} » n’est pas un fichier audio que ce navigateur peut décoder.',
     'errors.trimFailed': 'Impossible de découper l’enregistrement : {message}',
+    'errors.conversionBusy':
+      'Une autre conversion est déjà en cours. Attendez qu’elle se termine, puis réessayez.',
 
     'toast.saved': '« {name} » enregistré.',
     'toast.deleted': '« {name} » supprimé.',
@@ -476,6 +489,7 @@ export const messages = {
     'toast.restoreSkipped': '{count} fichier(s) ignoré(s) : le contrôle d’intégrité a échoué.',
     'toast.shared': '« {name} » partagé.',
     'toast.trimmed': 'Copie découpée enregistrée sous « {name} ».',
+    'toast.conversionCancelled': 'Conversion annulée — rien n’a été enregistré.',
     'toast.languageChanged': 'Langue définie sur le français.',
     'toast.statsCleared': 'Statistiques effacées.',
     'toast.noRecordings': 'Aucun enregistrement à exporter pour le moment.',
@@ -487,6 +501,11 @@ export const messages = {
       'Le stockage est plein à {percent} % — exportez une sauvegarde ou supprimez d’anciens enregistrements.',
     'toast.quotaCritical':
       'Le stockage est plein à {percent} % — les nouveaux enregistrements risquent d’échouer. Exportez et libérez de l’espace.',
+
+    'conversion.heading': 'Conversion audio',
+    'conversion.convertingWav': 'Conversion en WAV…',
+    'conversion.convertingMp3': 'Encodage en MP3…',
+    'conversion.trimmingWav': 'Découpage de l’audio…',
 
     'misc.offlineReady': 'Prêt pour une utilisation hors ligne.',
     'misc.updateReady': 'Une nouvelle version est disponible.',
@@ -501,6 +520,7 @@ export const messages = {
 
     'footer.rights': '© {year} Enregistreur audio — publié sous licence MIT.',
     'footer.license': 'Licence MIT',
+    'footer.encoderLicense': 'Encodeur MP3 : lamejs 1.2.1 (LGPL-3.0)',
     'footer.source': 'Code source',
     'footer.linksLabel': 'Liens du projet',
     'footer.credit': 'Sponsorisé par Ghana-GPT.com',

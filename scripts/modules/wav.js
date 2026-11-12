@@ -8,7 +8,16 @@
  * covered by tests/unit/wav.test.js.
  */
 
+import { ConversionCancelledError } from './conversion.js';
+
 export const WAV_HEADER_BYTES = 44;
+
+/**
+ * Frames per encoding chunk. Large enough that yielding to the event loop is
+ * cheap (≈1 MB of stereo output) and small enough that progress moves visibly
+ * and a cancel is honoured within a few milliseconds.
+ */
+export const WAV_CHUNK_FRAMES = 131_072;
 
 /**
  * Clamp a float sample to the signed 16-bit range.
@@ -91,13 +100,13 @@ export function encodeWavFrames(view, offset, channels, startFrame = 0, endFrame
 }
 
 /**
- * Encode one or more Float32 channel buffers as a RIFF/WAVE PCM16 file.
+ * Validate encoder input and return its shape.
  *
  * @param {Float32Array[]} channels
  * @param {number} sampleRate
- * @returns {ArrayBuffer}
+ * @returns {{ channelCount: number, frameCount: number }}
  */
-export function encodeWav(channels, sampleRate) {
+function assertChannels(channels, sampleRate) {
   if (!Array.isArray(channels) || channels.length === 0) {
     throw new TypeError('encodeWav: at least one channel is required');
   }
@@ -115,11 +124,82 @@ export function encodeWav(channels, sampleRate) {
       throw new TypeError('encodeWav: all channels must have the same length');
     }
   }
+  return { channelCount, frameCount };
+}
+
+/**
+ * Encode one or more Float32 channel buffers as a RIFF/WAVE PCM16 file.
+ *
+ * @param {Float32Array[]} channels
+ * @param {number} sampleRate
+ * @returns {ArrayBuffer}
+ */
+export function encodeWav(channels, sampleRate) {
+  const { channelCount, frameCount } = assertChannels(channels, sampleRate);
 
   const view = new DataView(wavHeader(channelCount, sampleRate, frameCount));
   const buffer = new ArrayBuffer(WAV_HEADER_BYTES + frameCount * channelCount * 2);
   new Uint8Array(buffer).set(new Uint8Array(view.buffer));
   encodeWavFrames(new DataView(buffer), WAV_HEADER_BYTES, channels);
+  return buffer;
+}
+
+/**
+ * Yield to the event loop so the progress panel can paint and a cancel click can
+ * be delivered between chunks. `setTimeout` is clamped to ~4 ms in browsers;
+ * at 131k frames per chunk that is well under 1 % overhead.
+ *
+ * @returns {Promise<void>}
+ */
+function yieldToEventLoop() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+/**
+ * Encode WAV in bounded chunks, reporting progress and honouring cancellation.
+ *
+ * Produces exactly the same bytes as `encodeWav` (there is a unit test for it),
+ * but never blocks the main thread for the whole file.
+ *
+ * @param {Float32Array[]} channels
+ * @param {number} sampleRate
+ * @param {{
+ *   signal?: AbortSignal|null,
+ *   onProgress?: ((fraction: number) => void)|null,
+ *   chunkFrames?: number,
+ *   yieldFn?: (() => Promise<void>)|null,
+ * }} [options]
+ * @returns {Promise<ArrayBuffer>}
+ */
+export async function encodeWavAsync(
+  channels,
+  sampleRate,
+  { signal = null, onProgress = null, chunkFrames = WAV_CHUNK_FRAMES, yieldFn = null } = {},
+) {
+  const { channelCount, frameCount } = assertChannels(channels, sampleRate);
+  const chunk = Math.max(1, Math.floor(Number(chunkFrames) || WAV_CHUNK_FRAMES));
+  const yieldNow = yieldFn ?? yieldToEventLoop;
+
+  const buffer = new ArrayBuffer(WAV_HEADER_BYTES + frameCount * channelCount * 2);
+  new Uint8Array(buffer).set(new Uint8Array(wavHeader(channelCount, sampleRate, frameCount)));
+  const view = new DataView(buffer);
+
+  if (signal?.aborted) throw new ConversionCancelledError();
+  if (onProgress) onProgress(0);
+  if (frameCount === 0) return buffer;
+
+  const blockAlign = channelCount * 2;
+  let written = 0;
+  while (written < frameCount) {
+    if (signal?.aborted) throw new ConversionCancelledError();
+    const end = Math.min(frameCount, written + chunk);
+    encodeWavFrames(view, WAV_HEADER_BYTES + written * blockAlign, channels, written, end);
+    written = end;
+    if (onProgress) onProgress(written / frameCount);
+    if (written < frameCount) await yieldNow();
+  }
   return buffer;
 }
 

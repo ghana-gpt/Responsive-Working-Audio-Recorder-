@@ -138,6 +138,32 @@
         </div>
       </section>
 
+      <section
+        id="conversion-panel"
+        class="card conversion"
+        aria-labelledby="conversion-heading"
+        hidden
+      >
+        <h2 id="conversion-heading" class="visually-hidden" data-i18n="conversion.heading">
+          Audio conversion
+        </h2>
+        <div class="conversion__row">
+          <p id="conversion-label" class="conversion__label" role="status" aria-live="polite"></p>
+          <progress
+            id="conversion-progress"
+            class="conversion__progress"
+            max="1"
+            value="0"
+            aria-labelledby="conversion-label"
+          ></progress>
+          <span id="conversion-percent" class="conversion__percent" aria-hidden="true"></span>
+          <button id="conversion-cancel-btn" class="btn btn--ghost btn--sm" type="button">
+            <span class="btn__icon" aria-hidden="true">✕</span>
+            <span class="btn__text" data-i18n="actions.cancel">Cancel</span>
+          </button>
+        </div>
+      </section>
+
       <section id="library" class="card library" aria-labelledby="library-heading">
         <div class="library__header">
           <h2 id="library-heading" data-i18n="library.title">Your recordings</h2>
@@ -362,6 +388,9 @@
           rel="noopener noreferrer"
         >
           <span data-i18n="footer.license">MIT licence</span>
+        </a>
+        <a href="vendor/lamejs-1.2.1/LICENSE.LGPL-3.0.txt">
+          <span data-i18n="footer.encoderLicense">MP3 encoder: lamejs 1.2.1 (LGPL-3.0)</span>
         </a>
       </nav>
       <p id="credit-line" class="app-footer__credit" hidden>
