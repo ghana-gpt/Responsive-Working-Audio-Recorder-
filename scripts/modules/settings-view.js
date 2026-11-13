@@ -9,6 +9,7 @@
 import { $, createElement, setFlag } from './dom.js';
 import { formatBytes, formatDuration } from './format.js';
 import { FORMAT_OPTIONS, formatAvailability, neverSupported } from './mime.js';
+import { ASR_LANGUAGES } from './asr.js';
 import { BITRATES } from './settings.js';
 
 /**
@@ -17,6 +18,9 @@ import { BITRATES } from './settings.js';
  *   t: (key: string, params?: object) => string,
  *   isTypeSupported?: (mimeType: string) => boolean,
  *   mp3EncoderAvailable?: boolean,
+ *   asrSupported?: boolean,
+ *   asrModelLabel?: string,
+ *   asrModelBytes?: number,
  *   onChange: (patch: object) => void,
  *   onReset: () => void,
  * }} options
@@ -26,6 +30,9 @@ export function createSettingsView({
   t,
   isTypeSupported = neverSupported,
   mp3EncoderAvailable = false,
+  asrSupported = false,
+  asrModelLabel = '',
+  asrModelBytes = 0,
   onChange,
   onReset,
 }) {
@@ -35,6 +42,9 @@ export function createSettingsView({
   const echoBox = $('#echo-cancellation', root);
   const gainBox = $('#auto-gain', root);
   const creditBox = $('#show-credit', root);
+  const liveBox = $('#live-transcribe', root);
+  const asrLanguageSelect = $('#asr-language', root);
+  const asrModelHint = $('#asr-model-hint', root);
   const statsLine = $('#storage-stats', root);
   const storageLine = $('#storage-status', root);
   const usageLine = $('#storage-usage', root);
@@ -62,16 +72,48 @@ export function createSettingsView({
     [echoBox, 'echoCancellation'],
     [gainBox, 'autoGainControl'],
     [creditBox, 'showCredit'],
+    [liveBox, 'transcribeLive'],
   ];
 
   for (const [box, key] of checkboxBindings) {
     box?.addEventListener('change', () => onChange({ [key]: Boolean(box.checked) }));
   }
 
+  asrLanguageSelect?.addEventListener('change', () => {
+    onChange({ asrLanguage: asrLanguageSelect.value });
+  });
+
   resetButton?.addEventListener('click', () => onReset());
 
   /** Build the format radios and quality options (only once). */
   function setStatic() {
+    // Transcription depends on WebAssembly plus module workers; the checkbox
+    // must not promise a feature this browser cannot deliver.
+    if (liveBox) {
+      liveBox.disabled = !asrSupported;
+      if (!asrSupported) liveBox.checked = false;
+    }
+    if (asrLanguageSelect) asrLanguageSelect.disabled = !asrSupported;
+    if (asrModelHint) {
+      asrModelHint.textContent = asrSupported
+        ? t('settings.asrModelHint', {
+            model: asrModelLabel,
+            size: formatBytes(asrModelBytes),
+          })
+        : t('settings.asrUnsupported');
+    }
+
+    if (asrLanguageSelect) {
+      asrLanguageSelect.replaceChildren(
+        ...ASR_LANGUAGES.map((language) =>
+          createElement('option', {
+            attrs: { value: language.id },
+            text: t(language.labelKey),
+          }),
+        ),
+      );
+    }
+
     if (qualitySelect) {
       qualitySelect.replaceChildren(
         ...BITRATES.map((bitrate) =>
@@ -164,6 +206,10 @@ export function createSettingsView({
     if (echoBox) echoBox.checked = Boolean(settings.echoCancellation);
     if (gainBox) gainBox.checked = Boolean(settings.autoGainControl);
     if (creditBox) creditBox.checked = Boolean(settings.showCredit);
+    if (liveBox) liveBox.checked = Boolean(settings.transcribeLive);
+    if (asrLanguageSelect && settings.asrLanguage) {
+      asrLanguageSelect.value = settings.asrLanguage;
+    }
 
     if (statsLine) {
       const summary = stats ?? { count: 0, totalDurationMs: 0, totalBytes: 0 };

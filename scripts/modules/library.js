@@ -3,6 +3,8 @@
  * No IndexedDB or DOM access — covered by tests/unit/library.test.js.
  */
 
+import { MAX_TRANSCRIPT_CHARS } from './asr.js';
+
 export const SORT_NEWEST = 'newest';
 export const SORT_OLDEST = 'oldest';
 export const SORT_NAME = 'name';
@@ -17,11 +19,15 @@ export const LIBRARY_PAGE_SIZE = 50;
 /** Markers are clamped to this many per recording to keep metadata small. */
 export const MAX_MARKERS = 500;
 
+/** Upper bound on stored transcript segments (a 10-hour recording, roughly). */
+export const MAX_TRANSCRIPT_SEGMENTS = 20_000;
+
 /**
- * Case-insensitive search across the recording name and its tags.
+ * Case-insensitive search across the recording name, its tags and its
+ * transcript (so a phrase you said can find the recording that contains it).
  * An empty query returns everything (a copy, so callers can sort safely).
  *
- * @param {Array<{ name?: string, tags?: string[] }>} records
+ * @param {Array<{ name?: string, tags?: string[], transcript?: { text?: string }|null }>} records
  * @param {string} query
  * @returns {Array<object>}
  */
@@ -35,7 +41,10 @@ export function filterRecordings(records, query) {
     const name = String(record?.name ?? '').toLowerCase();
     if (name.includes(needle)) return true;
     const tags = Array.isArray(record?.tags) ? record.tags : [];
-    return tags.some((tag) => String(tag).toLowerCase().includes(needle));
+    if (tags.some((tag) => String(tag).toLowerCase().includes(needle))) return true;
+    return String(record?.transcript?.text ?? '')
+      .toLowerCase()
+      .includes(needle);
   });
 }
 
@@ -153,6 +162,68 @@ export function normalizeMarkers(input) {
 }
 
 /**
+ * Normalise a stored transcript.
+ *
+ * The transcript lives on the recording's metadata row: it is small (plain text
+ * plus timestamps), so it needs no object store of its own and disappears with
+ * the recording it belongs to — a delete can never leave an orphan behind.
+ *
+ * @param {{
+ *   text?: string,
+ *   segments?: Array<{ start?: number, end?: number, text?: string }>,
+ *   language?: string,
+ *   model?: string,
+ *   createdAt?: number,
+ *   durationSeconds?: number,
+ *   skippedWindows?: number,
+ *   edited?: boolean,
+ * }|null|undefined} input
+ * @returns {{
+ *   text: string,
+ *   segments: Array<{ start: number, end: number, text: string }>,
+ *   language: string,
+ *   model: string,
+ *   createdAt: number,
+ *   durationSeconds: number,
+ *   skippedWindows: number,
+ *   edited: boolean,
+ * }|null} `null` when there is nothing to store
+ */
+export function normalizeTranscript(input) {
+  if (!input || typeof input !== 'object') return null;
+
+  const text = String(input.text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_TRANSCRIPT_CHARS);
+
+  const segments = [];
+  for (const segment of Array.isArray(input.segments) ? input.segments : []) {
+    const segmentText = String(segment?.text ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!segmentText) continue;
+    const start = Math.max(0, Number(segment?.start) || 0);
+    const end = Math.max(start, Number(segment?.end) || start);
+    segments.push({ start, end, text: segmentText.slice(0, 2000) });
+    if (segments.length >= MAX_TRANSCRIPT_SEGMENTS) break;
+  }
+
+  if (!text && segments.length === 0) return null;
+
+  return {
+    text,
+    segments,
+    language: String(input.language ?? 'auto').slice(0, 16),
+    model: String(input.model ?? '').slice(0, 120),
+    createdAt: Math.max(0, Number(input.createdAt) || 0),
+    durationSeconds: Math.max(0, Number(input.durationSeconds) || 0),
+    skippedWindows: Math.max(0, Math.floor(Number(input.skippedWindows) || 0)),
+    edited: Boolean(input.edited),
+  };
+}
+
+/**
  * Find a record by id.
  * @param {Array<{ id: string }>} records
  * @param {string} id
@@ -230,6 +301,7 @@ export function buildRecording(input) {
     updatedAt,
     sourceId = null,
     trimmed = false,
+    transcript = null,
   } = input ?? {};
   if (!id) throw new TypeError('buildRecording requires an id');
 
@@ -258,5 +330,6 @@ export function buildRecording(input) {
     updatedAt: Number(updatedAt) || Number(createdAt) || 0,
     sourceId: sourceId ? String(sourceId) : null,
     trimmed: Boolean(trimmed),
+    transcript: normalizeTranscript(transcript),
   };
 }

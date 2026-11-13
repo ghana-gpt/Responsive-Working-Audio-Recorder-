@@ -94,13 +94,17 @@ export function buildAudioConstraints(prefs = {}) {
  *   onLevel?: (info: { level: number, rms: number, peak: number, db: number }) => void,
  *   onTick?: (elapsedMs: number) => void,
  *   onTrackEnded?: () => void,
+ *   onAudio?: (samples: Float32Array, sampleRate: number) => void,
  * }} [handlers]
  */
-export function createRecorder({ onLevel, onTick, onTrackEnded } = {}) {
+export function createRecorder({ onLevel, onTick, onTrackEnded, onAudio } = {}) {
   /** @type {MediaStream|null} */ let stream = null;
   /** @type {MediaRecorder|null} */ let mediaRecorder = null;
   /** @type {AudioContext|null} */ let audioContext = null;
   /** @type {AnalyserNode|null} */ let analyser = null;
+  /** @type {AudioNode|null} */ let tapSource = null;
+  /** @type {ScriptProcessorNode|null} */ let tapNode = null;
+  /** @type {GainNode|null} */ let tapSink = null;
   /** @type {number|null} */ let frameRequest = null;
   /** @type {Uint8Array<ArrayBuffer>|null} */ let timeDomainData = null;
   /** @type {Blob[]} */ let chunks = [];
@@ -174,6 +178,21 @@ export function createRecorder({ onLevel, onTick, onTrackEnded } = {}) {
   function releaseStream() {
     stopping = true;
     stopMetering();
+    if (tapNode) {
+      // Disconnect before the context closes so no callback fires on a dead
+      // context (Chrome logs a warning and the tap would keep a stale copy).
+      tapNode.onaudioprocess = null;
+      try {
+        tapSource?.disconnect(tapNode);
+        tapNode.disconnect(tapSink);
+        tapSink?.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      tapSource = null;
+      tapNode = null;
+      tapSink = null;
+    }
     if (stream) {
       for (const track of stream.getTracks()) {
         try {
@@ -237,7 +256,34 @@ export function createRecorder({ onLevel, onTick, onTrackEnded } = {}) {
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
         analyser.smoothingTimeConstant = 0.6;
-        audioContext.createMediaStreamSource(stream).connect(analyser);
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        if (typeof onAudio === 'function') {
+          // Live transcription needs the raw samples, which neither the
+          // analyser nor MediaRecorder can hand out. A ScriptProcessor is
+          // deprecated but is the only tap that works in every browser this app
+          // supports without a separate AudioWorklet module. The zero-gain sink
+          // keeps the node in the graph (Chrome only fires callbacks for
+          // connected nodes) while staying inaudible.
+          const rate = audioContext.sampleRate;
+          tapSource = source;
+          tapNode = audioContext.createScriptProcessor(4096, 1, 1);
+          tapSink = audioContext.createGain();
+          tapSink.gain.value = 0;
+          tapNode.onaudioprocess = (event) => {
+            if (!active || paused) return;
+            try {
+              // `slice()` because the input buffer is reused by the browser.
+              onAudio(event.inputBuffer.getChannelData(0).slice(), rate);
+            } catch (error) {
+              console.error('[recorder] onAudio failed', error);
+            }
+          };
+          source.connect(tapNode);
+          tapNode.connect(tapSink);
+          tapSink.connect(audioContext.destination);
+        }
       }
     } catch (error) {
       console.warn('[recorder] level metering unavailable', error);

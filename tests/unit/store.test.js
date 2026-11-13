@@ -270,3 +270,81 @@ test('clear empties both the database and the cache', async () => {
   assert.equal(db.records.size, 0);
   assert.equal(db.blobs.size, 0);
 });
+
+test('setTranscript stores the transcript on the metadata row', async () => {
+  const db = fakeDb();
+  const repo = createRepository({ db, now: () => 42, idFactory: ids('id') });
+  const blob = new Blob(['audio']);
+  await repo.create({ blob, name: 'Interview', durationMs: 3000 });
+
+  const stored = await repo.setTranscript('id-1', {
+    text: '  hello   world ',
+    segments: [{ start: 0, end: 1, text: 'hello world' }],
+    language: 'en',
+    model: 'tiny',
+    createdAt: 1_000,
+    durationSeconds: 3,
+  });
+
+  assert.equal(stored.transcript.text, 'hello world');
+  assert.equal(stored.transcript.segments.length, 1);
+  assert.equal(stored.transcript.edited, false);
+  assert.equal(repo.get('id-1').transcript.text, 'hello world');
+  assert.equal(db.records.get('id-1').transcript.text, 'hello world');
+  assert.equal(await repo.blobFor('id-1'), blob, 'the audio payload is untouched');
+  assert.equal(repo.get('id-1').size, blob.size);
+});
+
+test('setTranscript(null) removes the transcript but keeps the recording', async () => {
+  const db = fakeDb();
+  const repo = createRepository({ db, idFactory: ids('id') });
+  await repo.create({ blob: new Blob(['audio']), name: 'One' });
+  await repo.setTranscript('id-1', { text: 'words' });
+  assert.equal(repo.get('id-1').transcript.text, 'words');
+
+  const cleared = await repo.setTranscript('id-1', null);
+  assert.equal(cleared.transcript, null);
+  assert.equal(repo.get('id-1').transcript, null);
+  assert.equal(repo.all().length, 1);
+});
+
+test('setTranscript keeps the audio payload and rejects unknown ids', async () => {
+  const db = fakeDb();
+  const repo = createRepository({ db, idFactory: ids('id') });
+  const blob = new Blob(['audio-bytes']);
+  await repo.create({ blob, name: 'One' });
+  await repo.setTranscript('id-1', { text: 'first' });
+
+  const puts = db.calls.filter(([kind]) => kind === 'put');
+  assert.equal(puts.at(-1)[2], null, 'no replacement payload is written');
+
+  await assert.rejects(
+    repo.setTranscript('missing', { text: 'nope' }),
+    (error) => error.code === 'not-found',
+  );
+});
+
+test('deleting a recording deletes its transcript with it', async () => {
+  const db = fakeDb();
+  const repo = createRepository({ db, idFactory: ids('id') });
+  await repo.create({ blob: new Blob(['a']), name: 'One' });
+  await repo.create({ blob: new Blob(['b']), name: 'Two' });
+  await repo.setTranscript('id-1', { text: 'gone soon' });
+  await repo.setTranscript('id-2', { text: 'kept' });
+
+  assert.equal(await repo.remove('id-1'), true);
+  assert.equal(db.records.has('id-1'), false);
+  assert.equal(repo.get('id-2').transcript.text, 'kept');
+});
+
+test('a transcript survives a fresh load and is searchable', async () => {
+  const db = fakeDb();
+  const first = createRepository({ db, idFactory: ids('id') });
+  await first.create({ blob: new Blob(['a']), name: 'Memo', tags: [] });
+  await first.setTranscript('id-1', { text: 'remember the milk', language: 'en' });
+
+  const reloaded = createRepository({ db });
+  await reloaded.refresh();
+  assert.equal(reloaded.get('id-1').transcript.text, 'remember the milk');
+  assert.equal(reloaded.list({ query: 'milk' }).length, 1, 'search reads the transcript');
+});

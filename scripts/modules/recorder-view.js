@@ -31,6 +31,8 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
   const timerLabel = $('#timer-label', root);
   const meter = $('#level-meter', root);
   const formatHint = $('#format-hint', root);
+  const liveCaption = $('#live-caption', root);
+  const liveCaptionText = $('#live-caption-text', root);
   const errorPanel = $('#error-panel', root);
   const errorMessage = $('#error-message', root);
   const retryButton = $('#error-retry', root);
@@ -175,6 +177,24 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
     if (formatHint) formatHint.textContent = text;
   }
 
+  /**
+   * Live caption preview while recording (opt-in via the preferences).
+   *
+   * An empty string hides the block: there is nothing useful to show before the
+   * first slice has been decoded. The text node is an `aria-live` region, so
+   * each new slice is announced once instead of on every keystroke of a decode.
+   *
+   * @param {string} text
+   */
+  function setLiveCaption(text) {
+    if (!liveCaption) return;
+    const value = String(text ?? '').trim();
+    setFlag(liveCaption, 'hidden', value.length === 0);
+    if (liveCaptionText && liveCaptionText.textContent !== value) {
+      liveCaptionText.textContent = value;
+    }
+  }
+
   /** Show sample rate / channel count once the microphone opens. */
   function setMicrophoneHint(trackSettings) {
     if (!formatHint) return;
@@ -204,6 +224,7 @@ export function createRecorderView({ root = document, t, onAction, onRetry }) {
     setLevel,
     setElapsed,
     setFormatHint,
+    setLiveCaption,
     setMicrophoneHint,
     setStatic,
     /** Refresh labels after a language change. */

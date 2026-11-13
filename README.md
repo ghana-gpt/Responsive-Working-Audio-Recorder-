@@ -28,7 +28,7 @@ promise while fixing the engineering:
 | Recording duration includes pauses               | Elapsed time excludes paused intervals                                                 |
 | One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                                  |
 | English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                                 |
-| Untested                                         | 136 unit tests, HTML/service-worker validation and a 21-step e2e suite                 |
+| Untested                                         | 188 unit tests, HTML/service-worker validation and a 21-step e2e suite                 |
 
 ## Features
 
@@ -59,6 +59,18 @@ promise while fixing the engineering:
   initial shell stays small; it reports through the same progress panel and honours the
   same Cancel button as the WAV path. Where a browser can record MP3 itself, that native
   path is used and the encoder is never downloaded.
+- **Transcription** — on-device speech-to-text with a vendored
+  [transformers.js](https://github.com/huggingface/transformers.js) runtime
+  (Apache-2.0, see [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md))
+  and a quantized Whisper tiny model checked into `models/whisper-tiny`. A dedicated
+  module worker downloads the model once, resamples the stored audio to 16 kHz mono,
+  decodes it in 30 s windows and reports real progress; only then is the transcript
+  written next to the recording. Transcripts are editable, searchable and exportable
+  (plain text or SubRip), and a failure never touches the audio.
+- **Live captions** — an opt-in toggle previews the transcript while you record. The
+  preview decodes in 4–15 s slices, keeps at most one decode queued, stops capturing
+  samples the moment the microphone stops and never writes a preview to the library:
+  the saved recording still has to be transcribed explicitly.
 - **Playback** — one shared `<audio>` preview player, no object-URL leaks.
 - **Offline PWA** — precached shell, `manifest.webmanifest`, generated maskable icons,
   install prompt and "new version available" toast.
@@ -104,6 +116,11 @@ iOS rows describe the APIs the app targets — validate them manually before a r
 Unsupported formats are disabled in the settings panel with an explanation instead of
 silently failing, and every error is mapped to a human sentence (`errors.*` keys).
 
+Transcription needs `Worker` (module type), WebAssembly and the same-origin model files;
+when any of those are missing the feature hides itself and the rest of the app keeps
+working. The first transcription downloads about 45 MB (runtime + model) from this
+origin; it is cached afterwards, so it then works offline.
+
 ## Keyboard shortcuts
 
 | Key            | Action                                           |
@@ -126,12 +143,17 @@ button/link has focus, so they never steal a keystroke from an active control.
 ├── service-worker.js           # Offline shell cache (network-first navigations)
 ├── icons/                      # Generated SVG + PNG icons (192/512/maskable)
 ├── vendor/lamejs-1.2.1/        # Vendored MP3 encoder (LGPL-3.0, see NOTICE.md)
+├── vendor/transformers/        # Vendored ASR runtime (Apache-2.0, see NOTICE.md)
+├── models/whisper-tiny/        # Quantized Whisper tiny ONNX model + tokenizer
 ├── styles/main.css             # Design tokens, layout, components, themes
 ├── scripts/
 │   ├── main.js                 # Orchestrator: state, data, wiring, shortcuts, boot
 │   └── modules/                # Small, single-purpose ES modules
 │       ├── state.js            # State machine + observable store
 │       ├── recorder.js         # MediaRecorder + Web Audio engine
+│       ├── asr.js              # Whisper client: resample, window, normalise, SRT
+│       ├── asr-worker.js       # Module worker that runs transformers.js off-thread
+│       ├── live-transcript.js  # Opt-in live caption preview (4–15 s slices)
 │       ├── mime.js             # Format capability ladder
 │       ├── mp3.js              # MP3 encoder adapter (vendored lamejs, chunked)
 │       ├── store.js            # Recording repository (cache + IndexedDB)
@@ -178,6 +200,7 @@ test can assert real behaviour while the unit tests run in milliseconds.
 | `npm start`             | Serve the app at <http://127.0.0.1:4173>         |
 | `npm test`              | Unit tests (`node:test`, no framework)           |
 | `npm run test:e2e`      | Real Chromium flow with a fake microphone        |
+| `npm run test:e2e:asr`  | Same browser, stubbed Whisper worker, transcript |
 | `npm run lint`          | ESLint (flat config, browser + Node globals)     |
 | `npm run format`        | Prettier write                                   |
 | `npm run validate:html` | Markup, manifest, service-worker and i18n checks |
@@ -198,7 +221,14 @@ npm run verify
   validation), ZIP writing and reading (`unzip -t`, ZIP64,
   CRC failures, DEFLATE inflation), MIME fallbacks, search/sort/stats, sanitising,
   formatting, state transitions and i18n key parity — plus the static dev server (MIME
-  types, `no-store`, app-shell fallback, 404s and path containment).
+  types, `no-store`, app-shell fallback, 404s and path containment), transcription
+  (downmix/resample maths, window planning, worker orchestration with an injected
+  worker, progress normalisation, transcript caps, SubRip formatting and the size
+  quoted for the vendored model) and the live-caption cadence (4–15 s slices, one
+  queued decode, no previews after `stop()`), plus the service worker (cache-first
+  assets with a background refresh, shell fallback on an offline navigation, and cache
+  writes that never delay the response — that last one stalled multi-megabyte ONNX
+  downloads when it was awaited).
 - **The e2e suite** boots the real app in Chromium with
   `--use-fake-device-for-media-stream`, then records, pauses, resumes, stops, reloads
   (IndexedDB persistence), renames with tags, plays, downloads, deletes, imports a long
@@ -207,6 +237,11 @@ npm run verify
   the panel, saves a WAV capture, saves an MP3 capture and verifies the encoded bytes and
   its decoded duration, switches language and theme, exercises the `?`
   shortcut and waits for the service worker.
+  A second suite (`npm run test:e2e:asr`) swaps the real Whisper worker for a stub that
+  speaks the same protocol, then transcribes a take, checks the progress panel, the
+  stored transcript and the model label, reloads (IndexedDB persistence), searches by
+  transcript, exports SubRip and plain text, copies, edits (which drops the timings),
+  deletes the transcript without deleting the audio and records with live captions on.
   Set `PUPPETEER_EXECUTABLE_PATH` if Chrome is not in a standard location and
   `E2E_STRICT=1` to fail instead of skipping when no browser is found (CI does both).
 
@@ -225,10 +260,13 @@ The app is static files — any host works (GitHub Pages, Netlify, S3, nginx).
 ## Privacy
 
 - No backend, no third-party requests, no fonts, no telemetry. The only third-party
-  code is the MP3 encoder, vendored and served from this origin (never a CDN).
+  code is the MP3 encoder and the speech-to-text runtime, both vendored and served from
+  this origin (never a CDN).
 - The Content-Security-Policy allows only same-origin resources (`script-src 'self'`,
   `connect-src 'self'`), so an injected tracker could not phone home either.
 - Recordings live in IndexedDB on your device; object URLs are revoked after use.
+- Transcription runs entirely in a module worker on your device — Whisper is downloaded
+  once from this origin, and neither the audio nor the text is ever uploaded.
 - The app asks the browser for _persistent_ storage so recordings are not evicted
   under storage pressure, and warns when the quota is nearly full.
 - The only outbound links are the GitHub repository and the sponsor credit, and the
@@ -249,6 +287,11 @@ Issues and pull requests are welcome — please read
 - MP3 encoding: [lamejs](https://github.com/zhuker/lamejs) 1.2.1 by Alex Zhukov, a port
   of LAME, vendored unmodified — see
   [`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md).
+- Speech-to-text: [transformers.js](https://github.com/huggingface/transformers.js) and
+  [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Apache-2.0) plus the
+  quantized [`whisper-tiny`](https://huggingface.co/openai/whisper-tiny) model, all
+  vendored under `vendor/transformers/` and `models/whisper-tiny/` — see
+  [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md).
 
 ## Licence
 

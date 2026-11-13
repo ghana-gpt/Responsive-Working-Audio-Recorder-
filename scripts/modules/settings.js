@@ -5,6 +5,7 @@
  * entry must never put the UI into an unusable state.
  */
 
+import { ASR_LANGUAGES } from './asr.js';
 import { SORT_OPTIONS } from './library.js';
 
 export const SETTINGS_KEY = 'audio-recorder:settings:v2';
@@ -13,6 +14,9 @@ export const LOCALE_KEY = 'audio-recorder:locale';
 
 export const THEMES = ['system', 'light', 'dark'];
 export const BITRATES = [32000, 64000, 96000, 128000, 256000];
+
+/** Language ids accepted for transcription (`auto` = let Whisper decide). */
+export const ASR_LANGUAGE_OPTIONS = ASR_LANGUAGES.map((language) => language.id);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   format: 'auto',
@@ -24,6 +28,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   locale: 'auto',
   showCredit: true,
   sort: 'newest',
+  transcribeLive: false,
+  asrLanguage: 'auto',
 });
 
 /** @returns {Storage|null} */
@@ -57,6 +63,9 @@ export function normalizeSettings(input = {}) {
   // `SORT_OPTIONS` is the single source of truth: a new sort order must survive a
   // reload instead of silently snapping back to "newest".
   const sort = SORT_OPTIONS.includes(source.sort) ? source.sort : DEFAULT_SETTINGS.sort;
+  const asrLanguage = ASR_LANGUAGE_OPTIONS.includes(source.asrLanguage)
+    ? source.asrLanguage
+    : DEFAULT_SETTINGS.asrLanguage;
   const boolean = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
   return {
     format,
@@ -68,6 +77,8 @@ export function normalizeSettings(input = {}) {
     locale: typeof source.locale === 'string' && source.locale ? source.locale : 'auto',
     showCredit: boolean(source.showCredit, DEFAULT_SETTINGS.showCredit),
     sort,
+    transcribeLive: boolean(source.transcribeLive, DEFAULT_SETTINGS.transcribeLive),
+    asrLanguage,
   };
 }
 

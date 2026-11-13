@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { ASR_LANGUAGES } from '../../scripts/modules/asr.js';
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
@@ -112,5 +113,34 @@ test('every code used by the app maps to a message that exists', () => {
   for (const code of codes) {
     const key = errorKeyForCode(code);
     assert.ok(key in messages[DEFAULT_LOCALE], `${code} -> ${key} is missing`);
+  }
+});
+
+test('every ASR language has a label in every locale', () => {
+  assert.ok(ASR_LANGUAGES.length >= 2, 'auto plus at least one real language');
+  const ids = new Set();
+  for (const language of ASR_LANGUAGES) {
+    assert.match(language.id, /^[a-z-]+$/, 'ids are plain Whisper language codes');
+    assert.equal(ids.has(language.id), false, `${language.id} is listed twice`);
+    ids.add(language.id);
+    for (const { code } of SUPPORTED_LOCALES) {
+      const label = messages[code][language.labelKey];
+      assert.equal(typeof label, 'string', `${code} is missing ${language.labelKey}`);
+      assert.ok(label.trim().length > 0, `${code}/${language.labelKey} is empty`);
+    }
+  }
+  assert.ok(ids.has('auto'), 'the auto-detect entry is required');
+});
+
+test('transcription messages exist in every locale', () => {
+  const keys = Object.keys(messages[DEFAULT_LOCALE]).filter(
+    (key) =>
+      key.startsWith('transcript.') || key.startsWith('asr.') || key.startsWith('settings.asr'),
+  );
+  assert.ok(keys.length >= 10, 'the transcript UI is translated');
+  for (const key of keys) {
+    for (const { code } of SUPPORTED_LOCALES) {
+      assert.equal(typeof messages[code][key], 'string', `${code} is missing ${key}`);
+    }
   }
 });

@@ -148,6 +148,21 @@ export function createRepository({
   }
 
   /**
+   * Attach (or clear) the transcript of a recording.
+   *
+   * The transcript is part of the recording's metadata row, so this is a plain
+   * update: nothing else has to be kept in sync and deleting the recording
+   * deletes its transcript with it.
+   *
+   * @param {string} id
+   * @param {object|null} transcript `null` removes the transcript
+   * @returns {Promise<object>} the updated metadata record
+   */
+  async function setTranscript(id, transcript) {
+    return update(id, { transcript: transcript ?? null });
+  }
+
+  /**
    * @param {string} id
    * @returns {Promise<boolean>} true when a record was removed
    */
@@ -263,6 +278,7 @@ export function createRepository({
     refresh,
     create,
     update,
+    setTranscript,
     remove,
     removeMany,
     restore,

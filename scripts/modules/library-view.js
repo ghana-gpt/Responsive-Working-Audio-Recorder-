@@ -9,6 +9,7 @@
 
 import { $, createElement, setFlag } from './dom.js';
 import { formatBytes, formatDateTime, formatDuration, formatSeconds } from './format.js';
+import { ASR_LANGUAGES, ASR_MODEL_LABEL } from './asr.js';
 
 /**
  * @param {{
@@ -43,6 +44,18 @@ export function createLibraryView({ root = document, t, locale, canShare = false
 
   /** @type {string|null} id of the row currently in rename mode */
   let renamingId = null;
+
+  /** @type {string|null} id of the row whose transcript is being edited */
+  let transcriptEditingId = null;
+
+  /**
+   * Last progress reported per recording id. Kept here (not in the render model)
+   * so a decode tick patches one `<progress>` element instead of rebuilding the
+   * row, which would steal focus and collapse the transcript panel.
+   *
+   * @type {Map<string, { fraction: number|null, stage: string }>}
+   */
+  const transcribeProgress = new Map();
 
   importButton?.addEventListener('click', () => importInput?.click());
 
@@ -108,6 +121,16 @@ export function createLibraryView({ root = document, t, locale, canShare = false
       onAction({ type: 'refresh' });
       return;
     }
+    if (action === 'edit-transcript') {
+      startTranscriptEdit(id, row);
+      return;
+    }
+    if (action === 'cancel-transcript-edit') {
+      transcriptEditingId = null;
+      invalidate(id);
+      onAction({ type: 'refresh' });
+      return;
+    }
     if (action === 'select') return; // handled by the change listener
     onAction({ type: action, id });
   });
@@ -126,6 +149,18 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     event.preventDefault();
     const id = form.dataset.id;
     if (!id) return;
+    // The transcript editor posts the whole text, not a name/tags pair.
+    if (form.dataset.transcriptForm === 'true') {
+      const field = form.elements.namedItem('transcript');
+      transcriptEditingId = null;
+      invalidate(id);
+      onAction({
+        type: 'save-transcript',
+        id,
+        text: field instanceof HTMLTextAreaElement ? field.value : '',
+      });
+      return;
+    }
     const nameField = form.elements.namedItem('name');
     const tagsField = form.elements.namedItem('tags');
     renamingId = null;
@@ -211,6 +246,209 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     });
   }
 
+  /** Text action button: the transcript controls need words, not just glyphs. */
+  function textButton(action, label, text, { disabled = false, hint = '' } = {}) {
+    const button = createElement('button', {
+      class: ['btn', 'btn--ghost', 'btn--sm'],
+      attrs: { type: 'button', 'data-action': action, 'aria-label': label },
+      text,
+    });
+    if (disabled) {
+      button.disabled = true;
+      // A disabled button takes no tooltip, so the reason is also its title and
+      // is spelled out in the sibling hint paragraph (see buildTranscriptBlock).
+      button.title = hint || label;
+    }
+    return button;
+  }
+
+  /** Localised name of the language Whisper reported (falls back to the code). */
+  function languageLabel(code) {
+    const id = String(code ?? '')
+      .trim()
+      .toLowerCase();
+    if (!id) return t('misc.unknown');
+    const known = ASR_LANGUAGES.find((language) => language.id === id);
+    return known ? t(known.labelKey) : id.toUpperCase();
+  }
+
+  /**
+   * Write one progress state into a status label + bar pair.
+   *
+   * The percentage is rounded to 5 % buckets so a 40-window decode updates the
+   * live region about twenty times instead of once per chunk.
+   *
+   * @param {{ label: HTMLElement|null, bar: HTMLProgressElement|null }} nodes
+   * @param {{ fraction: number|null, stage: string }|undefined} state
+   */
+  function applyProgressState(nodes, state) {
+    const fraction =
+      state && Number.isFinite(state.fraction)
+        ? Math.min(1, Math.max(0, Number(state.fraction)))
+        : null;
+    if (nodes.bar) {
+      if (fraction === null) nodes.bar.removeAttribute('value');
+      else nodes.bar.value = fraction;
+    }
+    if (!nodes.label) return;
+    const percent = fraction === null ? null : Math.round(Math.round(fraction * 100) / 5) * 5;
+    const text =
+      percent === null || state?.stage === 'load'
+        ? t('transcript.preparing')
+        : t('transcript.progress', { percent });
+    if (nodes.label.textContent !== text) nodes.label.textContent = text;
+  }
+
+  /**
+   * Placeholder shown while a recording is being transcribed. The bar is patched
+   * in place by `setTranscribeProgress`, so decoding never rebuilds the row.
+   *
+   * @param {object} record
+   */
+  function buildProgressBlock(record) {
+    const label = createElement('p', {
+      class: 'transcript__status',
+      attrs: { role: 'status', 'aria-live': 'polite' },
+    });
+    const bar = createElement('progress', {
+      class: 'transcript__bar',
+      attrs: { max: '1', 'data-progress': '' },
+    });
+    applyProgressState({ label, bar }, transcribeProgress.get(record.id));
+    // The cancel button lives in the row's action group (it replaces Transcribe),
+    // so this block stays a pure status readout.
+    return createElement('div', {
+      class: ['transcript', 'transcript--busy'],
+      children: [label, bar],
+    });
+  }
+
+  /**
+   * Stored transcript of one recording: the text plus copy / download / edit /
+   * delete. Returns `null` when the recording has no transcript and is not busy.
+   *
+   * `<details>` keeps a long transcript out of the way without removing it from
+   * the accessibility tree, and its open state survives re-renders because a row
+   * is only rebuilt when its signature changes.
+   *
+   * @param {object} record
+   * @param {object} model
+   */
+  function buildTranscriptBlock(record, model) {
+    if (model.transcribingId === record.id) return buildProgressBlock(record);
+    const transcript = record.transcript;
+    const text = typeof transcript?.text === 'string' ? transcript.text : '';
+    if (!text) return null;
+
+    const name = record.name || t('recording.untitled');
+    const segments = Array.isArray(transcript.segments) ? transcript.segments : [];
+    const hasTimings = segments.length > 0;
+
+    // An edited transcript has no matching timings any more, so .srt is offered
+    // again only after a fresh transcription (see normalizeTranscript).
+    const srtButton = textButton('download-transcript-srt', t('transcript.downloadSrt'), '.srt', {
+      disabled: !hasTimings,
+      hint: t('transcript.srtNeedsTimings'),
+    });
+
+    const body = createElement('div', {
+      class: 'transcript__body',
+      dataset: { transcriptBody: '' },
+      children: [
+        createElement('p', { class: 'transcript__text', text }),
+        hasTimings
+          ? null
+          : createElement('p', {
+              class: 'transcript__hint',
+              text: t('transcript.srtNeedsTimings'),
+            }),
+        createElement('div', {
+          class: 'transcript__actions',
+          children: [
+            textButton('copy-transcript', t('transcript.copyAction', { name }), t('actions.copy')),
+            textButton('download-transcript-txt', t('transcript.downloadTxt'), '.txt'),
+            srtButton,
+            textButton('edit-transcript', t('transcript.editAction', { name }), t('actions.edit')),
+            textButton(
+              'delete-transcript',
+              t('transcript.clearAction', { name }),
+              t('actions.delete'),
+            ),
+          ],
+        }),
+      ],
+    });
+
+    return createElement('details', {
+      class: 'transcript',
+      attrs: { open: true },
+      children: [
+        createElement('summary', {
+          class: 'transcript__summary',
+          children: [
+            createElement('span', { class: 'transcript__title', text: t('transcript.title') }),
+            createElement('span', {
+              class: 'transcript__meta',
+              text: t('transcript.meta', {
+                model: transcript.model || ASR_MODEL_LABEL,
+                language: languageLabel(transcript.language),
+                date: formatDateTime(
+                  transcript.createdAt || record.createdAt,
+                  model.locale ?? locale,
+                ),
+              }),
+            }),
+          ],
+        }),
+        body,
+      ],
+    });
+  }
+
+  /** Swap the transcript body for a textarea; the rest of the row stays intact. */
+  function startTranscriptEdit(id, row) {
+    const body = row.querySelector('[data-transcript-body]');
+    const record = row.recordData;
+    if (!body || !record?.transcript) return;
+    transcriptEditingId = id;
+    const name = record.name || t('recording.untitled');
+    const field = createElement('textarea', {
+      class: 'transcript__editor',
+      attrs: {
+        name: 'transcript',
+        rows: '6',
+        spellcheck: 'true',
+        'aria-label': t('transcript.editorLabel', { name }),
+      },
+    });
+    field.value = record.transcript.text ?? '';
+    const form = createElement('form', {
+      class: 'transcript__form',
+      dataset: { id, transcriptForm: 'true' },
+      children: [
+        field,
+        createElement('div', {
+          class: 'transcript__actions',
+          children: [
+            createElement('button', {
+              class: ['btn', 'btn--primary', 'btn--sm'],
+              attrs: { type: 'submit' },
+              text: t('transcript.save'),
+            }),
+            createElement('button', {
+              class: ['btn', 'btn--ghost', 'btn--sm'],
+              attrs: { type: 'button', 'data-action': 'cancel-transcript-edit' },
+              text: t('transcript.discard'),
+            }),
+          ],
+        }),
+      ],
+    });
+    body.replaceChildren(form);
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }
+
   /** @param {object} record @param {object} model */
   function buildRow(record, model) {
     const name = record.name || t('recording.untitled');
@@ -255,6 +493,9 @@ export function createLibraryView({ root = document, t, locale, canShare = false
         ),
         iconButton('download', t('recording.download', { name }), '⤓'),
         iconButton('trim', t('recording.trim', { name }), '✂'),
+        model.transcribingId === record.id
+          ? textButton('cancel-transcribe', t('transcript.cancelAction'), '✕')
+          : iconButton('transcribe', t('transcript.transcribeAction', { name }), '✍'),
         canShare ? iconButton('share', t('recording.share', { name }), '⤴') : null,
         iconButton('rename', t('recording.rename', { name }), '✎'),
         iconButton('delete', t('recording.delete', { name }), '🗑', 'danger'),
@@ -296,7 +537,8 @@ export function createLibraryView({ root = document, t, locale, canShare = false
           ],
         }),
         actions,
-      ],
+        buildTranscriptBlock(record, model),
+      ].filter(Boolean),
     });
 
     // Kept off the DOM so the rename editor can read the current values.
@@ -346,6 +588,7 @@ export function createLibraryView({ root = document, t, locale, canShare = false
 
   /** Cheap fingerprint of everything a row displays. */
   function rowSignature(record, model) {
+    const transcript = record.transcript;
     return JSON.stringify([
       record.name ?? '',
       Array.isArray(record.tags) ? record.tags : null,
@@ -355,6 +598,16 @@ export function createLibraryView({ root = document, t, locale, canShare = false
       Number(record.createdAt) || 0,
       record.extension ?? '',
       Array.isArray(record.markers) ? record.markers.length : 0,
+      // Only the presence and revision of the transcript matter: the text itself
+      // is already summarised by its length + edit timestamp.
+      transcript
+        ? [
+            String(transcript.text ?? '').length,
+            Number(transcript.createdAt) || 0,
+            Array.isArray(transcript.segments) ? transcript.segments.length : 0,
+          ]
+        : null,
+      model.transcribingId === record.id,
       model.locale ?? '',
     ]);
   }
@@ -382,8 +635,11 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     const query = String(model.query ?? '');
     const sort = model.sort ?? 'newest';
 
-    // Drop the rename flag when its row is no longer part of the rendered set.
+    // Drop the inline-editor flags when their row is no longer rendered.
     if (renamingId && !records.some((record) => record.id === renamingId)) renamingId = null;
+    if (transcriptEditingId && !records.some((record) => record.id === transcriptEditingId)) {
+      transcriptEditingId = null;
+    }
 
     if (searchInput && searchInput.value !== query) searchInput.value = query;
     if (sortSelect) sortSelect.value = sort;
@@ -439,7 +695,12 @@ export function createLibraryView({ root = document, t, locale, canShare = false
       const signature = rowSignature(record, rowModel);
       let entry = rows.get(record.id);
 
-      if (entry && renamingId !== record.id && entry.signature !== signature) {
+      if (
+        entry &&
+        renamingId !== record.id &&
+        transcriptEditingId !== record.id &&
+        entry.signature !== signature
+      ) {
         const replacement = buildRow(record, rowModel);
         entry.element.replaceWith(replacement);
         entry = { element: replacement, signature };
@@ -480,9 +741,49 @@ export function createLibraryView({ root = document, t, locale, canShare = false
     if (sortSelect) sortSelect.setAttribute('aria-label', t('library.sort'));
   }
 
+  /**
+   * Patch the progress readout of one row without re-rendering it.
+   *
+   * @param {string} id
+   * @param {number|null} fraction 0..1, or `null` while the model is loading
+   * @param {'load'|'decode'} [stage]
+   */
+  function setTranscribeProgress(id, fraction, stage = 'decode') {
+    const state = { fraction, stage };
+    transcribeProgress.set(id, state);
+    const row = list?.querySelector(`[data-id="${CSS.escape(String(id))}"]`);
+    if (!row) return;
+    applyProgressState(
+      {
+        label: row.querySelector('.transcript__status'),
+        bar: row.querySelector('[data-progress]'),
+      },
+      state,
+    );
+  }
+
+  /**
+   * Forget the progress of a finished (or cancelled) transcription so the next
+   * attempt starts from an indeterminate bar.
+   *
+   * @param {string} id
+   */
+  function clearTranscribeProgress(id) {
+    transcribeProgress.delete(id);
+  }
+
   return {
     render,
     setStatic,
+    setTranscribeProgress,
+    clearTranscribeProgress,
+    /**
+     * Force the next render to rebuild one row (metadata changed in a way the
+     * cheap signature cannot see, e.g. an edited transcript of equal length).
+     *
+     * @param {string} id
+     */
+    invalidateRow: invalidate,
     /** Id of the row currently being renamed (used by the e2e test). */
     renamingId: () => renamingId,
     focusRow: (id) => {

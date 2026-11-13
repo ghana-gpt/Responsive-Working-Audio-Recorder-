@@ -14,7 +14,7 @@
     <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; object-src 'none'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; object-src 'none'; img-src 'self' data:; media-src 'self' blob:; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'"
     />
     <link rel="canonical" href="https://ghana-gpt.github.io/Responsive-Working-Audio-Recorder-/" />
     <link rel="manifest" href="manifest.webmanifest" />
@@ -130,6 +130,13 @@
           Ready. Press record to start.
         </p>
         <p id="recording-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
+
+        <div id="live-caption" class="recorder__caption" hidden>
+          <span class="recorder__caption-label" data-i18n="asr.liveCaptionLabel">
+            Live transcript preview
+          </span>
+          <p id="live-caption-text" class="recorder__caption-text" aria-live="polite"></p>
+        </div>
 
         <div id="error-panel" class="error-panel" role="alert" hidden>
           <h3 class="error-panel__title" data-i18n="errors.title">Microphone problem</h3>
@@ -295,6 +302,23 @@
           </fieldset>
 
           <fieldset class="settings__group">
+            <legend data-i18n="settings.speech">Speech to text</legend>
+            <label class="checkbox">
+              <input id="live-transcribe" type="checkbox" />
+              <span data-i18n="settings.liveTranscribe">Show live captions while recording</span>
+            </label>
+            <div class="field">
+              <label for="asr-language" data-i18n="settings.asrLanguage">Spoken language</label>
+              <select id="asr-language"></select>
+            </div>
+            <p class="hint" data-i18n="settings.speechHint">
+              Whisper runs on this device. Nothing is uploaded and the model is already included, so
+              transcription works offline.
+            </p>
+            <p id="asr-model-hint" class="hint"></p>
+          </fieldset>
+
+          <fieldset class="settings__group">
             <legend data-i18n="settings.stats">Local statistics</legend>
             <p id="storage-stats" class="settings__stats"></p>
 
@@ -353,6 +377,10 @@
             <li data-i18n="help.step4">
               Rename, tag, trim, play or download — one file at a time or as a ZIP.
             </li>
+            <li data-i18n="help.step5">
+              Transcribe a saved recording on this device, then copy the text or export it as .txt /
+              .srt subtitles.
+            </li>
           </ol>
           <p class="notice notice--privacy" data-i18n="help.privacy">
             Audio never leaves your device. No server, no account, no tracking.
@@ -391,6 +419,9 @@
         </a>
         <a href="vendor/lamejs-1.2.1/LICENSE.LGPL-3.0.txt">
           <span data-i18n="footer.encoderLicense">MP3 encoder: lamejs 1.2.1 (LGPL-3.0)</span>
+        </a>
+        <a href="models/whisper-tiny/LICENSE">
+          <span data-i18n="footer.asrLicense">Speech model: Whisper tiny (MIT)</span>
         </a>
       </nav>
       <p id="credit-line" class="app-footer__credit" hidden>

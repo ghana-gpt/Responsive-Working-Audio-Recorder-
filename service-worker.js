@@ -7,10 +7,16 @@
  *    deploy is picked up immediately but the app still opens with no network;
  *  - everything else same-origin is cache-first with a background refresh.
  *
+ * The Whisper model (~40 MB of quantized ONNX graphs) is deliberately *not*
+ * precached: it is cached by the same cache-first rule the first time you
+ * transcribe, so you pay for it only if you use the feature and transcription
+ * then keeps working offline. The runtime that loads it (transformers.js and the
+ * ONNX Runtime WASM binary, ~4.6 MB) is app code, so it *is* precached.
+ *
  * Recordings never touch the cache: they live in IndexedDB and blob: URLs.
  */
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.1';
 const CACHE_NAME = `audio-recorder-shell-${VERSION}`;
 
 /** Files that make up the installable app shell (all relative to the scope). */
@@ -20,6 +26,8 @@ const SHELL_ASSETS = [
   './manifest.webmanifest',
   './styles/main.css',
   './scripts/main.js',
+  './scripts/modules/asr-worker.js',
+  './scripts/modules/asr.js',
   './scripts/modules/audio-utils.js',
   './scripts/modules/conversion-view.js',
   './scripts/modules/conversion.js',
@@ -30,6 +38,7 @@ const SHELL_ASSETS = [
   './scripts/modules/i18n.js',
   './scripts/modules/library.js',
   './scripts/modules/library-view.js',
+  './scripts/modules/live-transcript.js',
   './scripts/modules/mime.js',
   './scripts/modules/mp3.js',
   './scripts/modules/recorder.js',
@@ -47,6 +56,12 @@ const SHELL_ASSETS = [
   './vendor/lamejs-1.2.1/LICENSE.LGPL-3.0.txt',
   './vendor/lamejs-1.2.1/LICENSE.GPL-3.0.txt',
   './vendor/lamejs-1.2.1/NOTICE.md',
+  './vendor/transformers/NOTICE.md',
+  './vendor/transformers/LICENSE',
+  './vendor/transformers/LICENSE.onnxruntime',
+  './vendor/transformers/transformers.min.js',
+  './vendor/transformers/ort-wasm-simd.wasm',
+  './models/whisper-tiny/LICENSE',
   './icons/favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -95,7 +110,15 @@ async function handleNavigation(event) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const response = await fetch(event.request);
-    if (response.ok) await cache.put('./index.html', response.clone());
+    if (response.ok) {
+      // Same rule as `handleAsset`: the write must not delay the response.
+      const copy = response.clone();
+      event.waitUntil(
+        cache.put('./index.html', copy).catch((error) => {
+          console.warn('[sw] could not cache the shell', error);
+        }),
+      );
+    }
     return response;
   } catch {
     return (await cache.match('./index.html')) ?? (await cache.match('./')) ?? Response.error();
@@ -104,6 +127,14 @@ async function handleNavigation(event) {
 
 /**
  * Cache-first for static assets, revalidating in the background.
+ *
+ * Cache writes are never awaited before the response is returned. A response
+ * body is only pumped to the page once `respondWith` has produced it, so
+ * awaiting `cache.put(clone)` first would stall every download until the
+ * browser gives up — which is exactly what happened to the ~30 MB ONNX graphs
+ * (Chromium reported them as `net::ERR_ABORTED` and the model "loaded"
+ * forever). Writing in `waitUntil` keeps the copy going after the page has
+ * received the bytes.
  *
  * @param {FetchEvent} event
  */
@@ -126,7 +157,15 @@ async function handleAsset(event) {
 
   const response = await fetch(event.request);
   if (response.ok && response.type === 'basic') {
-    await cache.put(event.request, response.clone());
+    // `clone()` must be taken before the page touches the body; the copy is
+    // filled in as the download streams to the page.
+    const copy = response.clone();
+    event.waitUntil(
+      cache.put(event.request, copy).catch((error) => {
+        // Quota errors must not break playback of the asset being cached.
+        console.warn('[sw] could not cache', event.request.url, error);
+      }),
+    );
   }
   return response;
 }

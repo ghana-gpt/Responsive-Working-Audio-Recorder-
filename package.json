@@ -1,6 +1,6 @@
 {
   "name": "responsive-working-audio-recorder",
-  "version": "1.3.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "description": "A responsive, accessible, offline-capable audio recorder that runs entirely in the browser. No server, no tracking, MIT licensed.",
@@ -34,14 +34,15 @@
     "test": "node --test tests/unit/",
     "test:watch": "node --test --watch tests/unit/",
     "test:e2e": "node tests/e2e/recorder.e2e.mjs",
-    "test:all": "npm run test && npm run test:e2e",
+    "test:e2e:asr": "node tests/e2e/asr.e2e.mjs",
+    "test:all": "npm run test && npm run test:e2e && npm run test:e2e:asr",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "validate:html": "node tools/validate-html.mjs",
     "validate": "npm run validate:html && npm run lint && npm run test",
-    "verify": "npm run validate && npm run test:e2e",
+    "verify": "npm run validate && npm run test:e2e && npm run test:e2e:asr",
     "icons": "node tools/generate-icons.mjs"
   },
   "devDependencies": {

@@ -100,6 +100,8 @@ export const messages = {
     'actions.rename': 'Rename',
     'actions.reset': 'Reset',
     'actions.download': 'Download',
+    'actions.copy': 'Copy',
+    'actions.edit': 'Edit',
     'actions.ok': 'OK',
 
     'dialog.trimTitle': 'Trim recording',
@@ -123,6 +125,9 @@ export const messages = {
     'dialog.largeExportTitle': 'Build a large archive?',
     'dialog.largeExportBody':
       'This download is about {size}. The browser keeps the audio on this device until the save finishes, and it may take a while.',
+    'dialog.deleteTranscriptTitle': 'Delete this transcript?',
+    'dialog.deleteTranscriptBody':
+      'The transcript of “{name}” will be removed. The audio itself is kept and can be transcribed again at any time.',
 
     'settings.title': 'Preferences',
     'settings.format': 'Recording format',
@@ -173,6 +178,39 @@ export const messages = {
     'settings.storageTopEmpty': 'No recordings stored yet.',
     'settings.themeHint': '“Match system” follows your operating system setting.',
 
+    'settings.speech': 'Speech to text',
+    'settings.liveTranscribe': 'Show live captions while recording',
+    'settings.asrLanguage': 'Spoken language',
+    'settings.speechHint':
+      'Transcription runs on this device with Whisper. Nothing is uploaded and the model is already included, so it works offline.',
+    'settings.asrModelHint': 'Model: {model} · {size} stored on this device',
+    'settings.asrUnsupported':
+      'This browser cannot run the speech model (WebAssembly or module workers are unavailable).',
+
+    'asr.liveCaptionLabel': 'Live transcript preview',
+    'asr.languageAuto': 'Detect automatically',
+    'asr.languageEn': 'English',
+    'asr.languageFr': 'French',
+
+    'transcript.title': 'Transcript',
+    'transcript.transcribeAction': 'Transcribe {name}',
+    'transcript.cancelAction': 'Cancel transcription',
+    'transcript.progress': 'Transcribing… {percent}%',
+    'transcript.preparing': 'Loading the speech model…',
+    'transcript.show': 'Show transcript',
+    'transcript.hide': 'Hide transcript',
+    'transcript.copyAction': 'Copy the transcript of {name}',
+    'transcript.downloadTxt': 'Download as .txt',
+    'transcript.downloadSrt': 'Download as .srt',
+    'transcript.editAction': 'Edit the transcript of {name}',
+    'transcript.save': 'Save',
+    'transcript.discard': 'Discard',
+    'transcript.clearAction': 'Delete the transcript of {name}',
+    'transcript.meta': '{model} · {language} · {date}',
+    'transcript.srtNeedsTimings':
+      'Subtitles need the original timings: transcribe again to export .srt.',
+    'transcript.editorLabel': 'Transcript text for {name}',
+
     'shortcut.record': 'R or Space — start / stop recording',
     'shortcut.pause': 'P — pause or resume',
     'shortcut.play': 'Enter — play the selected recording',
@@ -185,6 +223,8 @@ export const messages = {
     'help.step2': 'Pause and resume whenever you like — the timer only counts while recording.',
     'help.step3': 'Press stop to save. The audio is stored on this device in IndexedDB.',
     'help.step4': 'Rename, tag, trim, play back or download — individually or as a ZIP.',
+    'help.step5':
+      'Transcribe a saved recording on this device, then copy the text or export it as .txt / .srt subtitles.',
     'help.privacy':
       'Audio never leaves your device. No server, no account, no analytics, no cookies.',
 
@@ -216,6 +256,18 @@ export const messages = {
     'errors.trimFailed': 'Could not trim the recording: {message}',
     'errors.conversionBusy':
       'Another conversion is already running. Wait for it to finish, then try again.',
+    'errors.asrFailed': 'Transcription failed: {message}',
+    'errors.asrUnsupported': 'This browser cannot run the speech model.',
+    'errors.asrBusy': 'A transcription is already running. Wait for it to finish.',
+    'errors.emptyAudio': 'There is no audio to transcribe.',
+
+    'toast.transcribed': 'Transcript ready for “{name}”.',
+    'toast.noSpeech': 'No speech was recognised in “{name}”.',
+    'toast.transcriptSaved': 'Transcript updated.',
+    'toast.transcriptDeleted': 'Transcript deleted.',
+    'toast.transcriptionCancelled': 'Transcription cancelled — nothing was changed.',
+    'toast.copied': 'Transcript copied to the clipboard.',
+    'toast.copyFailed': 'Could not copy. Select the text and copy it manually.',
 
     'toast.saved': 'Saved “{name}”.',
     'toast.deleted': 'Deleted “{name}”.',
@@ -258,6 +310,7 @@ export const messages = {
     'footer.rights': '© {year} Audio Recorder — released under the MIT licence.',
     'footer.license': 'MIT licence',
     'footer.encoderLicense': 'MP3 encoder: lamejs 1.2.1 (LGPL-3.0)',
+    'footer.asrLicense': 'Speech model: Whisper tiny (MIT)',
     'footer.source': 'Source code',
     'footer.linksLabel': 'Project links',
     'footer.credit': 'Sponsored by Ghana-GPT.com',
@@ -350,6 +403,8 @@ export const messages = {
     'actions.rename': 'Renommer',
     'actions.reset': 'Réinitialiser',
     'actions.download': 'Télécharger',
+    'actions.copy': 'Copier',
+    'actions.edit': 'Modifier',
     'actions.ok': 'OK',
 
     'dialog.trimTitle': 'Découper l’enregistrement',
@@ -373,6 +428,9 @@ export const messages = {
     'dialog.largeExportTitle': 'Créer une archive volumineuse ?',
     'dialog.largeExportBody':
       'Ce téléchargement fait environ {size}. Le navigateur conserve l’audio sur cet appareil jusqu’à la fin de l’enregistrement, ce qui peut prendre du temps.',
+    'dialog.deleteTranscriptTitle': 'Supprimer cette transcription ?',
+    'dialog.deleteTranscriptBody':
+      'La transcription de « {name} » sera supprimée. L’audio est conservé et peut être retranscrit à tout moment.',
 
     'settings.title': 'Préférences',
     'settings.format': 'Format d’enregistrement',
@@ -427,6 +485,39 @@ export const messages = {
     'settings.storageTopEmpty': 'Aucun enregistrement stocké pour le moment.',
     'settings.themeHint': '« Comme le système » suit le réglage de votre système.',
 
+    'settings.speech': 'Reconnaissance vocale',
+    'settings.liveTranscribe': 'Afficher les sous-titres en direct pendant l’enregistrement',
+    'settings.asrLanguage': 'Langue parlée',
+    'settings.speechHint':
+      'La transcription s’exécute sur cet appareil avec Whisper. Rien n’est envoyé et le modèle est déjà inclus : elle fonctionne hors ligne.',
+    'settings.asrModelHint': 'Modèle : {model} · {size} enregistrés sur cet appareil',
+    'settings.asrUnsupported':
+      'Ce navigateur ne peut pas exécuter le modèle vocal (WebAssembly ou les workers de module sont indisponibles).',
+
+    'asr.liveCaptionLabel': 'Aperçu de la transcription en direct',
+    'asr.languageAuto': 'Détecter automatiquement',
+    'asr.languageEn': 'Anglais',
+    'asr.languageFr': 'Français',
+
+    'transcript.title': 'Transcription',
+    'transcript.transcribeAction': 'Transcrire « {name} »',
+    'transcript.cancelAction': 'Annuler la transcription',
+    'transcript.progress': 'Transcription… {percent} %',
+    'transcript.preparing': 'Chargement du modèle vocal…',
+    'transcript.show': 'Afficher la transcription',
+    'transcript.hide': 'Masquer la transcription',
+    'transcript.copyAction': 'Copier la transcription de « {name} »',
+    'transcript.downloadTxt': 'Télécharger en .txt',
+    'transcript.downloadSrt': 'Télécharger en .srt',
+    'transcript.editAction': 'Modifier la transcription de « {name} »',
+    'transcript.save': 'Enregistrer',
+    'transcript.discard': 'Abandonner',
+    'transcript.clearAction': 'Supprimer la transcription de « {name} »',
+    'transcript.meta': '{model} · {language} · {date}',
+    'transcript.srtNeedsTimings':
+      'Les sous-titres ont besoin des minutages d’origine : relancez la transcription pour exporter en .srt.',
+    'transcript.editorLabel': 'Texte de la transcription de « {name} »',
+
     'shortcut.record': 'R ou Espace — démarrer / arrêter',
     'shortcut.pause': 'P — pause ou reprise',
     'shortcut.play': 'Entrée — lire l’enregistrement sélectionné',
@@ -441,6 +532,8 @@ export const messages = {
     'help.step3':
       'Appuyez sur arrêter pour sauvegarder. L’audio est stocké sur cet appareil dans IndexedDB.',
     'help.step4': 'Renommez, étiquetez, découpez, écoutez ou téléchargez — à l’unité ou en ZIP.',
+    'help.step5':
+      'Transcrivez un enregistrement sur cet appareil, puis copiez le texte ou exportez-le en .txt / .srt.',
     'help.privacy':
       'L’audio ne quitte jamais votre appareil. Aucun serveur, aucun compte, aucun suivi.',
 
@@ -478,6 +571,18 @@ export const messages = {
     'errors.trimFailed': 'Impossible de découper l’enregistrement : {message}',
     'errors.conversionBusy':
       'Une autre conversion est déjà en cours. Attendez qu’elle se termine, puis réessayez.',
+    'errors.asrFailed': 'La transcription a échoué : {message}',
+    'errors.asrUnsupported': 'Ce navigateur ne peut pas exécuter le modèle vocal.',
+    'errors.asrBusy': 'Une transcription est déjà en cours. Attendez qu’elle se termine.',
+    'errors.emptyAudio': 'Il n’y a aucun audio à transcrire.',
+
+    'toast.transcribed': 'Transcription prête pour « {name} ».',
+    'toast.noSpeech': 'Aucune parole reconnue dans « {name} ».',
+    'toast.transcriptSaved': 'Transcription mise à jour.',
+    'toast.transcriptDeleted': 'Transcription supprimée.',
+    'toast.transcriptionCancelled': 'Transcription annulée — rien n’a été modifié.',
+    'toast.copied': 'Transcription copiée dans le presse-papiers.',
+    'toast.copyFailed': 'Copie impossible. Sélectionnez le texte et copiez-le manuellement.',
 
     'toast.saved': '« {name} » enregistré.',
     'toast.deleted': '« {name} » supprimé.',
@@ -521,6 +626,7 @@ export const messages = {
     'footer.rights': '© {year} Enregistreur audio — publié sous licence MIT.',
     'footer.license': 'Licence MIT',
     'footer.encoderLicense': 'Encodeur MP3 : lamejs 1.2.1 (LGPL-3.0)',
+    'footer.asrLicense': 'Modèle vocal : Whisper tiny (MIT)',
     'footer.source': 'Code source',
     'footer.linksLabel': 'Liens du projet',
     'footer.credit': 'Sponsorisé par Ghana-GPT.com',

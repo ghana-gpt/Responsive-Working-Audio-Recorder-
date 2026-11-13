@@ -7,6 +7,16 @@
  */
 
 import {
+  ASR_MODEL_BYTES,
+  ASR_MODEL_LABEL,
+  buildTranscript,
+  createTranscriber,
+  downmixToMono,
+  formatSrt,
+  formatTranscriptText,
+  isAsrSupported,
+} from './modules/asr.js';
+import {
   analyzeWaveform,
   convertToMp3,
   convertToWav,
@@ -35,6 +45,7 @@ import {
 } from './modules/i18n.js';
 import { createLibraryView } from './modules/library-view.js';
 import { LIBRARY_PAGE_SIZE, SORT_OPTIONS, pageWindow, topRecordings } from './modules/library.js';
+import { createLiveTranscript } from './modules/live-transcript.js';
 import { extensionForMime, resolveFormat } from './modules/mime.js';
 import { MP3_ENCODER_AVAILABLE } from './modules/mp3.js';
 import {
@@ -86,6 +97,12 @@ const app = {
   /** object URL of the preview player, revoked when it changes */
   objectUrl: null,
   installPrompt: null,
+  /** id of the recording being transcribed right now, or null */
+  transcribingId: null,
+  /** true while the opt-in live caption is feeding the shared worker */
+  liveCaptionActive: false,
+  /** @type {AbortController|null} the transcription the cancel button targets */
+  transcribeAbort: null,
 };
 
 /** Views and services, created in `init()`. */
@@ -100,6 +117,10 @@ let toaster;
 let conversionView;
 /** @type {AbortController|null} the conversion currently on screen, if any */
 let conversionJob = null;
+/** Main-thread client for the transcription worker (created in `init`). */
+let transcriber = null;
+/** Live caption preview (created in `init`). */
+let liveTranscript = null;
 
 /** Bound translator: always reads the current locale. */
 const t = (key, params) => app.t(key, params);
@@ -242,6 +263,7 @@ async function handleRequest() {
     store.dispatch(ACTIONS.START);
     recorderView.setFormatHint(t('misc.formatHint', { format: plan.label }));
     recorderView.setMicrophoneHint(trackSettings);
+    startLiveCaption();
   } catch (error) {
     reportError(error);
   }
@@ -261,6 +283,9 @@ function handleResume() {
  */
 async function handleFinish({ reason = '' } = {}) {
   if (!store.dispatch(ACTIONS.FINISH)) return;
+  // The capture is over: free the worker for the real transcription the user
+  // may ask for next (a late preview answer is discarded by the module).
+  stopLiveCaption();
   try {
     const { blob, mimeType, durationMs } = await recorder.stop();
     const plan = app.plan ?? currentPlan();
@@ -338,6 +363,7 @@ async function handleFinish({ reason = '' } = {}) {
 /** Abort the recording in progress without saving anything. */
 function handleCancel() {
   recorder.cancel();
+  stopLiveCaption();
   if (!store.dispatch(ACTIONS.CANCEL)) store.dispatch(ACTIONS.RESET);
   updateFormatHint();
 }
@@ -440,6 +466,7 @@ function renderLibrary() {
     activeId: app.activeId,
     playing: app.playing,
     locale: app.locale,
+    transcribingId: app.transcribingId,
   });
   renderSettings();
 }
@@ -976,13 +1003,37 @@ async function handleLibraryIntent(intent) {
     case 'rename':
       await renameRecording(intent.id, intent.name, intent.tags);
       break;
+    case 'transcribe':
+      await transcribeRecording(intent.id);
+      break;
+    case 'cancel-transcribe':
+      cancelTranscription();
+      break;
+    case 'save-transcript':
+      await saveTranscript(intent.id, intent.text);
+      break;
+    case 'copy-transcript':
+      await copyTranscript(intent.id);
+      break;
+    case 'download-transcript-txt':
+      downloadTranscript(intent.id, 'txt');
+      break;
+    case 'download-transcript-srt':
+      downloadTranscript(intent.id, 'srt');
+      break;
+    case 'delete-transcript':
+      await confirmDeleteTranscript(intent.id);
+      break;
     case 'delete':
+      abortTranscriptionFor([intent.id]);
       await deleteRecording(intent.id);
       break;
     case 'deleteSelection':
+      abortTranscriptionFor(selectedIds());
       await deleteSelection();
       break;
     case 'clearAll':
+      abortTranscriptionFor(repo.all().map((record) => record.id));
       await clearAll();
       break;
     case 'zipAll':
@@ -997,6 +1048,311 @@ async function handleLibraryIntent(intent) {
     default:
       break;
   }
+}
+
+// ---------------------------------------------------------- transcription ---
+
+/** Whether this browser can run the local speech model at all. */
+const asrSupported = isAsrSupported();
+
+/**
+ * Wait (briefly) for the worker to finish the live preview of the capture the
+ * user just stopped, so the real transcription does not bounce off `busy`.
+ */
+async function waitForTranscriber(timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (transcriber?.isBusy() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+}
+
+/** Turn a transcription failure into a localised message (never a raw code). */
+function reportAsrError(error) {
+  const code = String(error?.code ?? 'asrFailed');
+  if (code === 'cancelled') {
+    console.info('[asr] transcription cancelled by user');
+    toaster.show({ message: t('toast.transcriptionCancelled'), tone: 'info' });
+    return;
+  }
+  if (code === 'busy') {
+    toaster.show({ message: t('errors.asrBusy'), tone: 'error' });
+    return;
+  }
+  if (code === 'emptyAudio') {
+    toaster.show({ message: t('errors.emptyAudio'), tone: 'error' });
+    return;
+  }
+  console.warn('[asr] transcription failed', error);
+  toaster.show({
+    message: t('errors.asrFailed', { message: error?.message ?? code }),
+    tone: 'error',
+  });
+}
+
+/**
+ * Transcribe one saved recording, on this device.
+ *
+ * The audio is read back from IndexedDB, decoded to mono float samples and
+ * handed to the worker; the finished transcript is stored on the recording and
+ * replaces any previous one. Only one transcription runs at a time (the model
+ * holds a single ONNX session and the UI has one progress bar).
+ *
+ * @param {string} id
+ */
+async function transcribeRecording(id) {
+  const record = repo.get(id);
+  if (!record) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  if (!asrSupported || !transcriber) {
+    toaster.show({ message: t('errors.asrUnsupported'), tone: 'error' });
+    return;
+  }
+  if (app.transcribingId) {
+    toaster.show({ message: t('errors.asrBusy'), tone: 'error' });
+    return;
+  }
+
+  const job = new AbortController();
+  app.transcribingId = id;
+  app.transcribeAbort = job;
+  libraryView.setTranscribeProgress(id, null, 'load');
+  renderLibrary();
+
+  try {
+    const blob = await repo.blobFor(id);
+    if (!blob || blob.size === 0) {
+      throw Object.assign(new Error('empty recording'), { code: 'emptyAudio' });
+    }
+    const buffer = await decodeBlob(blob);
+    const channels = [];
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      channels.push(buffer.getChannelData(channel));
+    }
+    const mono = downmixToMono(channels);
+
+    await waitForTranscriber();
+    if (job.signal.aborted) {
+      throw Object.assign(new Error('cancelled'), { code: 'cancelled' });
+    }
+
+    const result = await transcriber.transcribe(mono, {
+      sampleRate: buffer.sampleRate,
+      language: app.settings.asrLanguage,
+      signal: job.signal,
+      onProgress: ({ stage, fraction }) => libraryView.setTranscribeProgress(id, fraction, stage),
+    });
+
+    const transcript = buildTranscript(result, {
+      model: ASR_MODEL_LABEL,
+      createdAt: Date.now(),
+      durationSeconds: result.durationSeconds,
+    });
+    if (!transcript) {
+      // Silence or a skipped decode: report it instead of storing an empty row.
+      toaster.show({ message: t('toast.noSpeech', { name: record.name }), tone: 'info' });
+      return;
+    }
+
+    await repo.setTranscript(id, transcript);
+    libraryView.invalidateRow(id);
+    toaster.show({ message: t('toast.transcribed', { name: record.name }), tone: 'success' });
+  } catch (error) {
+    reportAsrError(error);
+  } finally {
+    app.transcribeAbort = null;
+    app.transcribingId = null;
+    libraryView.clearTranscribeProgress(id);
+    renderLibrary();
+  }
+}
+
+/** Stop the transcription in progress (its audio and metadata stay untouched). */
+function cancelTranscription() {
+  app.transcribeAbort?.abort();
+}
+
+/**
+ * Cancel a running transcription when its recording is about to be deleted,
+ * so the worker stops decoding audio nobody will ever see.
+ * @param {Iterable<string>} ids
+ */
+function abortTranscriptionFor(ids) {
+  if (!app.transcribingId) return;
+  for (const id of ids) {
+    if (id === app.transcribingId) {
+      cancelTranscription();
+      return;
+    }
+  }
+}
+
+/**
+ * Start (or restart) the opt-in live caption for the capture that just began.
+ *
+ * The preview shares the single worker with the real transcription: it only
+ * runs while recording, and `handleFinish` stops it before anything else uses
+ * the model.
+ */
+function startLiveCaption() {
+  app.liveCaptionActive = Boolean(app.settings.transcribeLive) && asrSupported;
+  if (!app.liveCaptionActive || !liveTranscript) return;
+  liveTranscript.reset();
+  recorderView.setLiveCaption('');
+}
+
+/** Stop the live preview and clear its caption. */
+function stopLiveCaption() {
+  liveTranscript?.stop();
+  app.liveCaptionActive = false;
+  recorderView?.setLiveCaption('');
+}
+
+// ------------------------------------------------------ transcript actions ---
+
+/** Canonical transcript of a recording, or an empty string. */
+function transcriptTextFor(id) {
+  return formatTranscriptText(repo.get(id)?.transcript);
+}
+
+/** `name-2O26-05-04.txt` — the same naming scheme as the audio downloads. */
+function transcriptFileName(record, extension) {
+  return buildFileName({
+    name: sanitizeFileName(record?.name ?? ''),
+    extension,
+    date: record?.createdAt ? new Date(record.createdAt) : new Date(),
+  });
+}
+
+/**
+ * Export the transcript of a recording as plain text or SubRip subtitles.
+ *
+ * `.srt` needs the timings that only a machine transcription produces: once the
+ * text has been edited by hand the segments no longer describe it, so the
+ * button is disabled (`transcript.srtNeedsTimings`) and this is a no-op.
+ *
+ * @param {string} id
+ * @param {'txt'|'srt'} format
+ */
+function downloadTranscript(id, format) {
+  const record = repo.get(id);
+  if (!record?.transcript) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  const body =
+    format === 'srt'
+      ? formatSrt(record.transcript.segments)
+      : formatTranscriptText(record.transcript);
+  if (!body) {
+    toaster.show({
+      message: t(format === 'srt' ? 'transcript.srtNeedsTimings' : 'errors.notFound'),
+      tone: 'error',
+    });
+    return;
+  }
+  downloadBlob(
+    new Blob([body], { type: 'text/plain;charset=utf-8' }),
+    transcriptFileName(record, format),
+  );
+  toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+}
+
+/** Copy the transcript (edited or not) to the clipboard. */
+async function copyTranscript(id) {
+  const text = transcriptTextFor(id);
+  if (!text) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toaster.show({ message: t('toast.copied'), tone: 'success' });
+  } catch (error) {
+    console.warn('[transcript] could not copy', error);
+    toaster.show({ message: t('toast.copyFailed'), tone: 'error' });
+  }
+}
+
+/**
+ * Store a hand-edited transcript.
+ *
+ * The user replaces the recognised text wholesale, so the timed segments are
+ * dropped: they described the old wording. An empty submission is treated as
+ * "remove the transcript", which is what the delete action does too.
+ *
+ * @param {string} id
+ * @param {string} text
+ */
+async function saveTranscript(id, text) {
+  const record = repo.get(id);
+  if (!record) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  const clean = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) {
+    await removeTranscript(id);
+    return;
+  }
+  const previous = record.transcript ?? {};
+  try {
+    await repo.setTranscript(id, {
+      ...previous,
+      text: clean,
+      segments: [],
+      edited: true,
+      model: previous.model || ASR_MODEL_LABEL,
+    });
+  } catch (error) {
+    toaster.show({
+      message: errorMessage(error?.code ?? 'saveFailed', error?.message ?? ''),
+      tone: 'error',
+    });
+    return;
+  }
+  libraryView.invalidateRow(id);
+  renderLibrary();
+  toaster.show({ message: t('toast.transcriptSaved'), tone: 'success' });
+}
+
+/** Forget the transcript of a recording; the audio is untouched. */
+async function removeTranscript(id) {
+  if (!repo.get(id)) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  try {
+    await repo.setTranscript(id, null);
+  } catch (error) {
+    toaster.show({
+      message: errorMessage(error?.code ?? 'saveFailed', error?.message ?? ''),
+      tone: 'error',
+    });
+    return;
+  }
+  libraryView.invalidateRow(id);
+  renderLibrary();
+  toaster.show({ message: t('toast.transcriptDeleted'), tone: 'success' });
+}
+
+/** Confirm, then delete the transcript (never the recording). */
+async function confirmDeleteTranscript(id) {
+  const record = repo.get(id);
+  if (!record?.transcript) {
+    toaster.show({ message: t('errors.notFound'), tone: 'error' });
+    return;
+  }
+  const confirmed = await dialogs.confirm({
+    title: t('dialog.deleteTranscriptTitle'),
+    body: t('dialog.deleteTranscriptBody', { name: record.name }),
+    acceptLabel: t('actions.delete'),
+  });
+  if (!confirmed) return;
+  await removeTranscript(id);
 }
 
 // ------------------------------------------------------ settings and chrome ---
@@ -1080,6 +1436,14 @@ function handleSettingsChange(patch) {
   app.settings = saveSettings(patch);
   if ('theme' in patch) applyTheme(app.settings.theme);
   if ('showCredit' in patch) updateFooter();
+  if ('transcribeLive' in patch) {
+    // Honour the switch immediately: the caption is a preference, not a
+    // per-recording choice, and turning it off must stop the preview now.
+    const { mode } = store.getState();
+    const capturing = mode === MODES.RECORDING || mode === MODES.PAUSED;
+    if (!app.settings.transcribeLive) stopLiveCaption();
+    else if (capturing) startLiveCaption();
+  }
   renderSettings();
   if ('format' in patch || 'bitrate' in patch) updateFormatHint();
 }
@@ -1332,13 +1696,41 @@ async function init() {
     t,
     isTypeSupported,
     mp3EncoderAvailable: MP3_ENCODER_AVAILABLE,
+    asrSupported,
+    asrModelLabel: ASR_MODEL_LABEL,
+    asrModelBytes: ASR_MODEL_BYTES,
     onChange: handleSettingsChange,
     onReset: handleSettingsReset,
+  });
+  // The worker is only *spawned* on the first transcription; creating the
+  // client here keeps `isBusy`/`dispose` available to the rest of the wiring.
+  transcriber = createTranscriber();
+  liveTranscript = createLiveTranscript({
+    transcribe: (samples, { sampleRate }) => {
+      if (!transcriber) return Promise.reject(new Error('Transcription is unavailable'));
+      return transcriber.transcribe(samples, {
+        sampleRate,
+        language: app.settings.asrLanguage,
+      });
+    },
+    onUpdate: ({ text }) => {
+      if (!app.liveCaptionActive) return;
+      recorderView.setLiveCaption(text);
+    },
+    onError: () => {
+      // A preview is a bonus: a failed slice must never disturb the capture.
+      app.liveCaptionActive = false;
+      recorderView.setLiveCaption('');
+    },
   });
   recorder = createRecorder({
     onLevel: ({ level }) => recorderView.setLevel(level),
     onTick: (elapsed) => recorderView.setElapsed(elapsed),
     onTrackEnded: handleTrackEnded,
+    onAudio: (samples, sampleRate) => {
+      if (!app.liveCaptionActive) return;
+      liveTranscript?.push(samples, sampleRate);
+    },
   });
 
   // The state machine is the only thing that drives the recorder panel.
@@ -1390,6 +1782,9 @@ async function init() {
   window.addEventListener('pagehide', () => {
     recorder.cancel();
     cancelConversion();
+    stopLiveCaption();
+    cancelTranscription();
+    transcriber?.dispose();
   });
   document.addEventListener('keydown', handleShortcut);
 

@@ -60,6 +60,7 @@ const browserGlobals = {
   MediaRecorder: 'readonly',
   MediaStream: 'readonly',
   AudioContext: 'readonly',
+  Worker: 'readonly',
   CSS: 'readonly',
   Element: 'readonly',
   Node: 'readonly',
@@ -72,6 +73,7 @@ const browserGlobals = {
   HTMLFormElement: 'readonly',
   HTMLDetailsElement: 'readonly',
   HTMLAudioElement: 'readonly',
+  HTMLTextAreaElement: 'readonly',
 };
 
 const nodeGlobals = {
@@ -91,6 +93,9 @@ const nodeGlobals = {
   DOMException: 'readonly',
   AbortController: 'readonly',
   AbortSignal: 'readonly',
+  Headers: 'readonly',
+  Request: 'readonly',
+  Response: 'readonly',
   DecompressionStream: 'readonly',
   CompressionStream: 'readonly',
 };

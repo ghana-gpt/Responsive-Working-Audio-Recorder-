@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { MAX_TRANSCRIPT_CHARS } from '../../scripts/modules/asr.js';
 import {
+  MAX_TRANSCRIPT_SEGMENTS,
   SORT_LONGEST,
   SORT_LARGEST,
   SORT_NAME,
@@ -13,6 +15,7 @@ import {
   filterRecordings,
   findRecording,
   nextDefaultName,
+  normalizeTranscript,
   pageWindow,
   sortRecordings,
 } from '../../scripts/modules/library.js';
@@ -201,4 +204,91 @@ test('pageWindow tolerates empty input and invalid sizes', () => {
   const invalid = pageWindow(two, Number.NaN, 10);
   assert.equal(invalid.records.length, 2);
   assert.equal(invalid.hasMore, false);
+});
+
+test('search also looks inside the transcript', () => {
+  const withTranscript = [
+    { id: 'a', name: 'Voice note', transcript: { text: 'Meet me at the harbour at noon' } },
+    { id: 'b', name: 'Other', transcript: null },
+  ];
+  assert.equal(filterRecordings(withTranscript, 'harbour').length, 1);
+  assert.equal(filterRecordings(withTranscript, 'HARBOUR')[0].id, 'a');
+  assert.equal(filterRecordings(withTranscript, 'harbor').length, 0);
+});
+
+test('normalizeTranscript trims, caps and defaults every field', () => {
+  const transcript = normalizeTranscript({
+    text: '  Hello\n\nworld  ',
+    segments: [
+      { start: 0, end: 1.5, text: '  Hello  ' },
+      { start: -2, end: -1, text: 'world' },
+      { start: 2, end: 3, text: '   ' },
+      'not a segment',
+    ],
+    language: 'en',
+    model: 'tiny',
+    createdAt: 1_700_000_000_000,
+    durationSeconds: 12.5,
+    skippedWindows: 3.7,
+  });
+  assert.deepEqual(transcript, {
+    text: 'Hello world',
+    segments: [
+      { start: 0, end: 1.5, text: 'Hello' },
+      { start: 0, end: 0, text: 'world' },
+    ],
+    language: 'en',
+    model: 'tiny',
+    createdAt: 1_700_000_000_000,
+    durationSeconds: 12.5,
+    skippedWindows: 3,
+    edited: false,
+  });
+});
+
+test('normalizeTranscript defaults a hand-written transcript', () => {
+  const transcript = normalizeTranscript({ text: 'typed by hand', edited: true });
+  assert.equal(transcript.text, 'typed by hand');
+  assert.deepEqual(transcript.segments, []);
+  assert.equal(transcript.edited, true, 'an edited transcript has no timings');
+  assert.equal(transcript.language, 'auto');
+  assert.equal(transcript.createdAt, 0);
+});
+
+test('normalizeTranscript keeps a segment-only transcript', () => {
+  const transcript = normalizeTranscript({
+    segments: [{ start: 1, end: 2, text: 'only segments' }],
+  });
+  assert.equal(transcript.text, '', 'text is not guessed from segments');
+  assert.equal(transcript.segments.length, 1);
+});
+
+test('normalizeTranscript returns null for empty or invalid input', () => {
+  assert.equal(normalizeTranscript(null), null);
+  assert.equal(normalizeTranscript(undefined), null);
+  assert.equal(normalizeTranscript('text'), null);
+  assert.equal(normalizeTranscript({ text: '   ', segments: [] }), null);
+  assert.equal(normalizeTranscript({ segments: [{ start: 0, end: 1, text: ' ' }] }), null);
+});
+
+test('normalizeTranscript caps the stored text and segment count', () => {
+  const transcript = normalizeTranscript({
+    text: 'a'.repeat(MAX_TRANSCRIPT_CHARS + 10),
+    segments: Array.from({ length: MAX_TRANSCRIPT_SEGMENTS + 5 }, (_, index) => ({
+      start: index,
+      end: index + 1,
+      text: `line ${index}`,
+    })),
+  });
+  assert.equal(transcript.text.length, MAX_TRANSCRIPT_CHARS);
+  assert.equal(transcript.segments.length, MAX_TRANSCRIPT_SEGMENTS);
+});
+
+test('buildRecording stores a normalized transcript and drops junk', () => {
+  const transcript = { text: '  spoken  words ', segments: [], language: 'fr', edited: true };
+  const record = buildRecording({ id: 'a', size: 10, transcript });
+  assert.equal(record.transcript.text, 'spoken words');
+  assert.equal(record.transcript.edited, true);
+  assert.equal(buildRecording({ id: 'b', size: 10, transcript: 'nope' }).transcript, null);
+  assert.equal(buildRecording({ id: 'c', size: 10 }).transcript, null);
 });
