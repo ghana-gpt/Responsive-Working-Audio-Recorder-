@@ -2,11 +2,30 @@
 
 [![Version baseline: v1.0](https://img.shields.io/badge/baseline-v1.0-blue)](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/tree/v1.0)
 
-This page tracks the repository's version checkpoints. Branch links are source snapshots; GitHub Releases and tags are the preferred way to publish immutable downloadable versions. The `v1.0` branch is a snapshot of the repository state at commit `248b39907aab07830810388006d707d1a05d5c08`. The current `main` line is version **1.3.0** (referred to as v1.3 below), built on the v1.2 and v1.1 feature sets.
+This page tracks the repository's version checkpoints. Branch links are source snapshots; GitHub Releases and tags are the preferred way to publish immutable downloadable versions. The `v1.0` branch is a snapshot of the repository state at commit `248b39907aab07830810388006d707d1a05d5c08`. The current `main` line is version **1.4.2** (referred to as v1.4.2 below), built on the v1.4, v1.3, v1.2 and v1.1 feature sets.
 
-## v1.3.0 — current code (release pending)
+## v1.4.2 — current code (release pending)
 
-**Status:** The current code is version **1.3.0** in `package.json`, `package-lock.json` and `service-worker.js`. Local MP3 export shipped: a vendored encoder is loaded on demand and reports through the progress/cancel contract that v1.2 introduced. Microphone-processing transparency, the second v1.3 goal, is still open and is tracked as v1.4 below. This version has not been tagged or published as a GitHub Release.
+**Status:** The current code is version **1.4.2** in `package.json`, `package-lock.json` and `service-worker.js` — a patch release on the 1.4 line (offline speech transcription). It replaces the LGPL-3.0 MP3 encoder with an MIT-licensed WebAssembly build, so the app now ships nothing copyleft; the UI and the conversion contract are unchanged. This version has not been tagged or published as a GitHub Release.
+
+### Changed in v1.4.2
+
+- **MIT encoder** — `scripts/modules/mp3.js` now drives `vendor/audiobox/mp3-encoder.wasm`, a WebAssembly build of the [audiobox](https://crates.io/crates/audiobox) 0.5.1 MPEG-1 Layer III encoder (MIT). The binary is produced from the vendored crate sources in `vendor/audiobox-0.5.1/` plus the small Rust bridge in `encoder/`; `vendor/audiobox/NOTICE.md` records provenance, the ABI and the rebuild steps. `vendor/lamejs-1.2.1/` is gone.
+- **Off the main thread** — encoding runs in its own module worker (`mp3-worker.js`), which fetches the binary on first use. The page keeps painting during a long export instead of yielding between chunks, and terminating the worker at the end returns its heap.
+- **Same contract, one honest gap** — progress is real while samples are copied into the WASM heap, then reported as `null` (unknown) for the single encode call, then `1`, exactly like decode. Cancelling terminates the worker, because that is the only way to stop a blocking WASM call: the export ends at once with `ConversionCancelledError` and nothing is stored.
+- **Reproducible, verifiable build** — `npm run build:wasm` builds the bridge with `cargo` for `wasm32-unknown-unknown` and records the artifact and source digests in `vendor/audiobox/build-info.json`. `npm run check:wasm` (part of `npm run validate`, CI and the Pages deploy) fails when the committed `.wasm` no longer matches its sources, and needs no Rust toolchain.
+- **Attribution** — the footer's encoder link and the English/French licence strings point at audiobox's MIT licence, which ships with the crate sources.
+- **Verification** — `npm run verify` is green: `validate` (markup, manifest, service worker, i18n and `check:wasm`), 201 unit tests — 18 of them for MP3 (frame-by-frame parsing of the encoder's output, a cross-check with `ffprobe`/`ffmpeg` when installed, and a digest check against `build-info.json`) — 21/21 recorder e2e steps and 13/13 transcript steps in Chromium. The recorder suite is unchanged: it still saves an MP3 capture, plays the stored bytes and cancels one without storing anything.
+
+### Known limitations
+
+1. The encode call is opaque: progress cannot move inside it, so the bar is indeterminate for that stage (decode already was).
+2. The `ffprobe`/`ffmpeg` checks skip themselves when those binaries are missing, so a machine without FFmpeg validates the structure of the output but not its decoded duration.
+3. Rebuilding the binary needs Rust with the `wasm32-unknown-unknown` target; without it, `npm run check:wasm` only verifies that the committed binary and the sources still match.
+
+## v1.3.0 — previous release line (release pending)
+
+**Status:** This line shipped as **1.3.0** in `package.json`, `package-lock.json` and `service-worker.js`; the current code reports 1.4.2 (above). Local MP3 export shipped: a vendored encoder is loaded on demand and reports through the progress/cancel contract that v1.2 introduced. Microphone-processing transparency, the second v1.3 goal, is still open and is tracked as v1.4 below. The v1.3.0 encoder (lamejs) was replaced by an MIT-licensed WebAssembly build in v1.4.2; the entries below describe the code as it shipped in v1.3. This version has not been tagged or published as a GitHub Release.
 
 ### Included in v1.3
 
@@ -33,7 +52,7 @@ This page tracks the repository's version checkpoints. Branch links are source s
 
 ## v1.2.0 — previous release line (release pending)
 
-**Status:** This line shipped as **1.2.0** in `package.json`, `package-lock.json` and `service-worker.js`; the current code reports 1.3.0 (above). WAV conversions (saving a capture and trimming an existing recording) report real progress and can be cancelled. Local MP3 export, planned together with them, shipped in v1.3; microphone-processing transparency is now tracked as v1.4. The `v1.2.0` tag and GitHub Release still need creating.
+**Status:** This line shipped as **1.2.0** in `package.json`, `package-lock.json` and `service-worker.js`; the current code reports 1.4.2 (above). WAV conversions (saving a capture and trimming an existing recording) report real progress and can be cancelled. Local MP3 export, planned together with them, shipped in v1.3; microphone-processing transparency is now tracked as v1.4. The `v1.2.0` tag and GitHub Release still need creating.
 
 ### Included in v1.2
 
@@ -42,7 +61,7 @@ This page tracks the repository's version checkpoints. Branch links are source s
 - **Progress panel and cancellation** — a new `#conversion-panel` next to the recorder labels the operation ("Converting to WAV…", "Trimming audio…"), shows a determinate bar once encoding starts (indeterminate while decoding, which `decodeAudioData` cannot report on) and offers Cancel. Only one conversion may run at a time; a second attempt is refused with a toast instead of queueing.
 - **Cancel means cancel** — cancelling a WAV save returns the recorder to a usable state and says that nothing was saved; cancelling a trim leaves the library untouched. Decoding cannot be interrupted — the platform offers no hook — so the decoded buffer is discarded the moment it settles.
 - **Accessibility** — the percentage is decorative (`aria-hidden`) and the polite live region only carries the operation label, so screen readers are not flooded with frame updates; hiding the panel returns focus to the record button rather than stranding it on a hidden control.
-- **Verification** — at the v1.2 commit, `npm run verify` passed with 131 unit tests and 19 Chromium e2e steps, including steps that watch the panel with a `MutationObserver` (progress painted, then hidden), cancel a trim, and save a WAV capture. Current counts live in the v1.3 section above; automated coverage is Chromium only.
+- **Verification** — at the v1.2 commit, `npm run verify` passed with 131 unit tests and 19 Chromium e2e steps, including steps that watch the panel with a `MutationObserver` (progress painted, then hidden), cancel a trim, and save a WAV capture. Current counts live in the v1.4.2 section above; automated coverage is Chromium only.
 
 ### Known limitations and follow-up work
 
@@ -57,15 +76,15 @@ This page tracks the repository's version checkpoints. Branch links are source s
 - [Compare v1.1 with the current main](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/compare/v1.1...main)
 - [All published GitHub Releases](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases)
 
-## v1.4.0 — planned scope
+## v1.4.0 — partially shipped
 
-**Status:** Planned; not started. Local MP3 export shipped in v1.3 through the shared conversion contract (see above). What remains from the original v1.3 plan is trustworthy microphone-processing feedback. MP4/AAC transcoding is deliberately excluded.
+**Status:** The 1.4 line shipped offline speech transcription (1.4.0–1.4.1) and the MIT encoder swap (1.4.2, above). What remains from the original v1.3 plan is trustworthy microphone-processing feedback. MP4/AAC transcoding is deliberately excluded.
 
 ### Goals
 
 | #   | Goal                                               | Current state                                                                                                                                                                                                              |
 | --- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Local in-browser MP3 encoding                      | ✅ Shipped in v1.3 — `scripts/modules/mp3.js` over the vendored lamejs 1.2.1 build, selectable wherever the browser cannot record MP3 itself.                                                                              |
+| 1   | Local in-browser MP3 encoding                      | ✅ Shipped in v1.3 over lamejs, replaced in v1.4.2 by the MIT-licensed `vendor/audiobox/mp3-encoder.wasm`; selectable wherever the browser cannot record MP3 itself.                                                       |
 | 2   | Microphone-processing transparency and a mic check | `recorder.start()` returns `track.getSettings()`, but `recorderView.setMicrophoneHint()` only shows sample rate/channels. Nothing reports whether echo cancellation, noise suppression or auto gain were actually applied. |
 
 Details:
@@ -82,8 +101,8 @@ Details:
 
 ### Implementation constraints
 
-- The CSP allows only `script-src 'self'`. The MP3 encoder is the one vendored exception (a separate same-origin script, loaded on demand and precached); anything else must follow the same rules — no CDN imports, no runtime third-party requests.
-- The encoder licence was reviewed before adopting it (v1.3): lamejs 1.2.1 is LGPL-3.0, ships unmodified with its sources, and is documented in `vendor/lamejs-1.2.1/NOTICE.md`. Repeat that review before adding another dependency.
+- The CSP allows only `script-src 'self'`. The MP3 encoder is the one vendored exception (a same-origin `.wasm` fetched by a module worker, loaded on demand and precached); anything else must follow the same rules — no CDN imports, no runtime third-party requests.
+- The encoder licence was reviewed before adopting it, and again when it was replaced (v1.3 checked lamejs 1.2.1, LGPL-3.0; v1.4.2 replaced it with audiobox 0.5.1, MIT). The current binary is built from the vendored sources (`encoder/`, `vendor/audiobox-0.5.1/`) and documented in `vendor/audiobox/NOTICE.md`. Repeat that review before adding another dependency.
 - Keep `mime.js` pure: extend `resolveFormat()`/`formatAvailability()` with encoder capability instead of branching in the views.
 - Every new string needs English **and** French entries; the i18n parity test enforces this.
 - Bump `VERSION` in `service-worker.js` whenever precached files change.
@@ -98,7 +117,7 @@ Details:
 
 ## v1.1 — previous release line (release pending)
 
-**Status:** The v1.1 feature set shipped as **1.1.0** in `package.json` and `service-worker.js` and is carried forward in the current 1.3.0 code. The `v1.1.0` tag and GitHub Release still need creating; open limitations are listed separately and should not be mistaken for completed work.
+**Status:** The v1.1 feature set shipped as **1.1.0** in `package.json` and `service-worker.js` and is carried forward in the current 1.4.2 code. The `v1.1.0` tag and GitHub Release still need creating; open limitations are listed separately and should not be mistaken for completed work.
 
 ### Included in v1.1
 
@@ -107,7 +126,7 @@ Details:
 - **Repository rewrite** — IndexedDB schema v2 with metadata-only caching; audio payloads are fetched on demand, so the library never holds every blob in memory. Restore is atomic: a failed import leaves the cache and database untouched.
 - **Editing and playback** — 12-format capability ladder, WAV re-encoding, trim-to-a-new-recording (the original is preserved), and one shared preview player with no object-URL leaks.
 - **Interface** — English/French i18n with key-parity tests, light/dark/system themes, keyboard shortcuts, focus restoration, and the PWA install/update flow.
-- **Verification** — at the v1.1 commit, `npm run verify` passed with 118 unit tests and a 15-step Chromium e2e flow plus markup/manifest/service-worker/i18n validation. Current counts live in the v1.3 section above; automated coverage is still Chromium only.
+- **Verification** — at the v1.1 commit, `npm run verify` passed with 118 unit tests and a 15-step Chromium e2e flow plus markup/manifest/service-worker/i18n validation. Current counts live in the v1.4.2 section above; automated coverage is still Chromium only.
 
 ### Known limitations and follow-up work
 
@@ -136,7 +155,7 @@ The implemented features are part of v1.1. These status markers describe complet
 
 ### Suggested workflow for publishing v1.1
 
-1. Tag the commit that reported 1.1.0 — the current `main` reports 1.3.0 — and keep `package.json`, `package-lock.json`, `service-worker.js` and these notes in sync at version 1.1.0 on that commit.
+1. Tag the commit that reported 1.1.0 — the current `main` reports 1.4.2 — and keep `package.json`, `package-lock.json`, `service-worker.js` and these notes in sync at version 1.1.0 on that commit.
 2. Run `npm ci` and `npm run verify`, plus manual browser/device checks for changed audio/storage behavior.
 3. Create the `v1.1.0` tag on the final verified commit and publish the GitHub Release with notes summarizing included changes and known limitations.
 4. Keep `v1.0` available as the historical baseline. Prefer tags/releases over relying on a branch name alone for long-term versioning.

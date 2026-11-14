@@ -1,0 +1,908 @@
+use std::sync::Arc;
+
+use super::{Loop, OverLimit, ResamplingQuality, Stream, VoiceId};
+use crate::math::{exp2, sin_turns};
+use crate::{Audio, ErrorCode, FadeCurve, Result};
+
+/// Fixed-point position: 32 integer and 32 fractional bits of a source frame.
+pub(super) const ONE: u64 = 1 << 32;
+/// Source frames each voice buffers: interpolation history, lookahead and a read chunk.
+const RING: usize = 1024;
+const READ: usize = 256;
+/// Taps of the interpolation filter on each side of the position.
+const HALF: i64 = 8;
+const PHASES: usize = 256;
+
+/// A gain that moves from `from` to `to` over `len` frames from frame `start`.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Ramp {
+    from: f64,
+    to: f64,
+    start: u64,
+    len: u64,
+    curve: FadeCurve,
+}
+impl Ramp {
+    pub fn constant(value: f64) -> Self {
+        Self {
+            from: value,
+            to: value,
+            start: 0,
+            len: 0,
+            curve: FadeCurve::Linear,
+        }
+    }
+    pub fn value(&self, frame: u64) -> f64 {
+        if self.len == 0 || frame >= self.start + self.len {
+            return self.to;
+        }
+        if frame <= self.start {
+            return self.from;
+        }
+        let t = (frame - self.start) as f64 / self.len as f64;
+        let shape = |t: f64| match self.curve {
+            FadeCurve::Linear => t,
+            FadeCurve::EqualPower => sin_turns(t / 4.0),
+            FadeCurve::Exponential => t * t,
+        };
+        // A rising ramp follows the curve and a falling one mirrors it, as `Audio::fade` does.
+        if self.to >= self.from {
+            self.from + (self.to - self.from) * shape(t)
+        } else {
+            self.to + (self.from - self.to) * shape(1.0 - t)
+        }
+    }
+    /// Starts moving from the current value at `frame` to `to` over `len` frames.
+    pub fn retarget(&mut self, frame: u64, to: f64, len: u64, curve: FadeCurve) {
+        *self = Self {
+            from: self.value(frame),
+            to,
+            start: frame,
+            len,
+            curve,
+        };
+    }
+    pub fn finished(&self, frame: u64) -> bool {
+        self.len == 0 || frame >= self.start + self.len
+    }
+    /// The frame where the ramp reaches its target.
+    pub fn end(&self) -> u64 {
+        self.start + self.len
+    }
+    pub fn changing(&self, frame: u64) -> bool {
+        !self.finished(frame)
+    }
+}
+
+/// Windowed-sinc interpolation filter for one ratio of source to output rate: 16
+/// taps, Blackman window, cutoff 0.9 of the lower Nyquist frequency, 256 phases
+/// interpolated linearly. Built with the crate's own sine, so it is identical on
+/// every platform.
+#[derive(Debug)]
+pub(super) struct SincTable {
+    rows: Vec<[f64; 16]>,
+}
+impl SincTable {
+    pub fn new(ratio: f64) -> Self {
+        let cutoff = 0.9 / ratio.max(1.0);
+        let rows = (0..=PHASES)
+            .map(|p| {
+                let frac = p as f64 / PHASES as f64;
+                let mut row = [0.0; 16];
+                for (k, tap) in row.iter_mut().enumerate() {
+                    let x = (k as i64 - HALF + 1) as f64 - frac;
+                    let y = cutoff * x;
+                    let sinc = if y == 0.0 {
+                        1.0
+                    } else {
+                        sin_turns(y / 2.0) / (std::f64::consts::PI * y)
+                    };
+                    let w = x / HALF as f64;
+                    let window = if w.abs() >= 1.0 {
+                        0.0
+                    } else {
+                        0.42 + 0.5 * sin_turns(w / 2.0 + 0.25) + 0.08 * sin_turns(w + 0.25)
+                    };
+                    *tap = cutoff * sinc * window;
+                }
+                let sum: f64 = row.iter().sum();
+                row.map(|t| t / sum)
+            })
+            .collect();
+        Self { rows }
+    }
+}
+
+/// Ratios of the interpolation tables shared by voices whose playback speed differs
+/// from 1. Each covers speeds up to its ratio of source to output frames.
+const BANK: [f64; 9] = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 6.0, 8.0];
+
+/// Interpolation tables for changing playback speeds, built once when the mixer is
+/// made, since `render` cannot build tables. A voice uses the table of the smallest
+/// ratio at or above its current one, whose cutoff is low enough not to alias.
+#[derive(Debug)]
+pub(super) struct SincBank {
+    tables: Vec<SincTable>,
+}
+impl SincBank {
+    pub fn new() -> Self {
+        Self {
+            tables: BANK.iter().map(|&ratio| SincTable::new(ratio)).collect(),
+        }
+    }
+    fn index(ratio: f64) -> usize {
+        BANK.iter()
+            .position(|&r| ratio <= r)
+            .unwrap_or(BANK.len() - 1)
+    }
+}
+
+/// How a voice reads its source at speed 1, and the tables for other speeds.
+pub(super) struct Resampling {
+    pub quality: ResamplingQuality,
+    /// Fixed-point source frames per output frame.
+    pub step: u64,
+    /// Source frames per output frame.
+    pub base_ratio: f64,
+    /// The exact table for `base_ratio`, or `None` at the output rate.
+    pub table: Option<Arc<SincTable>>,
+    pub bank: Arc<SincBank>,
+}
+
+pub(super) enum Feed {
+    Memory(Arc<Audio>),
+    Stream(Box<dyn Stream>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum State {
+    Playing,
+    /// Fading out after a stop or a steal; the voice ends when the fade does.
+    Stopping,
+    Finished,
+    Failed(ErrorCode),
+}
+
+/// A voice's instance limits, with the gap in output frames.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct InstanceLimit {
+    pub key: u64,
+    pub max: u16,
+    pub min_gap: u64,
+    pub policy: OverLimit,
+}
+
+pub(super) struct Voice {
+    pub source_peak: f64,
+    pub virtualized: bool,
+    quality: ResamplingQuality,
+    /// Original memory-source origin; no ring data needs to be read while virtual.
+    memory_origin: u64,
+    memory_dirty: bool,
+    #[cfg(feature = "music")]
+    pub music: Option<super::music::LayerState>,
+    pub id: VoiceId,
+    /// Chosen to give way to a starting voice, while its start is decided.
+    pub marked: bool,
+    pub instances: Option<InstanceLimit>,
+    pub bus: usize,
+    pub priority: u8,
+    /// Order of starting, to find the oldest voice.
+    pub order: u64,
+    pub state: State,
+    pub gain: Ramp,
+    pub pan: Ramp,
+    /// Fade-in and fade-out envelope.
+    pub fade: Ramp,
+    /// Gain from the distance to the listener.
+    pub distance: Ramp,
+    /// Frames and curve of the fade-in, applied when the voice starts.
+    pub fade_in: (u64, FadeCurve),
+    feed: Feed,
+    channels: usize,
+    looping: Option<(u64, Option<u64>)>,
+    /// The loop's first and end source frames, when the end is known.
+    loop_span: Option<(u64, u64)>,
+    /// Next source frame the feed reads.
+    source_pos: u64,
+    ring: Vec<f32>,
+    /// Virtual frames buffered so far, and the virtual frame where the feed ended.
+    filled: i64,
+    end: Option<i64>,
+    position: u64,
+    /// Fixed-point source frames per output frame, now and at speed 1.
+    step: u64,
+    base_step: u64,
+    /// The step that brought the voice to its position, which decides whether it has
+    /// played out, so a speed change at that frame cannot revive it.
+    last_step: u64,
+    /// Source frames per output frame at speed 1.
+    base_ratio: f64,
+    /// The last pitch's bits and `exp2(pitch / 12)`: Doppler changes the speed every
+    /// frame while the pitch usually stays put, and the result is the same.
+    pitch_factor: (u64, f64),
+    /// The exact table for speed 1, or `None` when the source is at the output rate.
+    table: Option<Arc<SincTable>>,
+    bank: Arc<SincBank>,
+    /// The bank table in use while the speed differs from 1.
+    bank_index: Option<usize>,
+    /// Playback rate, and pitch in semitones: together, the playback speed.
+    pub rate: Ramp,
+    pub pitch: Ramp,
+    /// Output frames during which the voice was frozen by a pause. The voice's own
+    /// time, which its ramps follow, is the output frame minus this.
+    offset: u64,
+    /// Gain of pause and resume fades, in the voice's own time, so a bus pause also
+    /// holds an unfinished fade.
+    pause: Ramp,
+    /// Fading out towards a pause, or paused.
+    pausing: bool,
+    paused: bool,
+    /// Virtual frames where the source restarted, and the source frame it restarted
+    /// at, to map the playback position back to source frames across loops.
+    jumps: [(i64, u64); JUMPS],
+    jump_count: usize,
+    /// Temporary starvation: retry only at the next render segment.
+    starved: bool,
+    pub emitter: Option<super::Emitter>,
+    direction: [Ramp; 8],
+    doppler: Ramp,
+}
+
+/// Loop restarts remembered for mapping positions; enough for loops longer than the
+/// voice's buffer, and an approximation for shorter ones.
+const JUMPS: usize = 16;
+
+impl Voice {
+    pub fn new(
+        id: VoiceId,
+        feed: Feed,
+        channels: usize,
+        looping: Loop,
+        resampling: Resampling,
+    ) -> Self {
+        let Resampling {
+            quality,
+            step,
+            base_ratio,
+            table,
+            bank,
+        } = resampling;
+        let looping = match looping {
+            Loop::Off => None,
+            Loop::Whole => Some((0, None)),
+            Loop::Region { start, end } => Some((start, Some(end))),
+        };
+        let length = match &feed {
+            Feed::Memory(audio) => Some(audio.frames() as u64),
+            Feed::Stream(stream) => stream.frames(),
+        };
+        let loop_span = looping.and_then(|(start, end)| end.or(length).map(|end| (start, end)));
+        Self {
+            source_peak: 1.0,
+            virtualized: false,
+            quality,
+            memory_origin: 0,
+            memory_dirty: false,
+            #[cfg(feature = "music")]
+            music: None,
+            marked: false,
+            loop_span,
+            id,
+            instances: None,
+            bus: 0,
+            priority: 128,
+            order: 0,
+            state: State::Playing,
+            gain: Ramp::constant(1.0),
+            pan: Ramp::constant(0.0),
+            fade: Ramp::constant(1.0),
+            distance: Ramp::constant(1.0),
+            fade_in: (0, FadeCurve::Linear),
+            feed,
+            channels,
+            looping,
+            source_pos: 0,
+            ring: vec![0.0; RING * channels],
+            filled: 0,
+            end: None,
+            position: 0,
+            step,
+            base_step: step,
+            last_step: step,
+            base_ratio,
+            pitch_factor: (f64::NAN.to_bits(), 0.0),
+            table,
+            bank,
+            bank_index: None,
+            rate: Ramp::constant(1.0),
+            pitch: Ramp::constant(0.0),
+            offset: 0,
+            pause: Ramp::constant(1.0),
+            pausing: false,
+            paused: false,
+            jumps: [(0, 0); JUMPS],
+            jump_count: 1,
+            starved: false,
+            emitter: None,
+            direction: [Ramp::constant(0.0); 8],
+            doppler: Ramp::constant(1.0),
+        }
+    }
+    /// Starts the source at `frame`. Runs on the game's thread, where a stream may seek.
+    pub fn set_start(&mut self, frame: u64) -> Result<()> {
+        if frame > 0 {
+            if let Feed::Stream(stream) = &mut self.feed {
+                stream.seek(frame)?;
+            }
+        }
+        self.source_pos = frame;
+        self.memory_origin = frame;
+        self.jumps[0] = (0, frame);
+        Ok(())
+    }
+    /// The voice's own time at output frame `frame`, which stops while it is paused.
+    pub fn time(&self, frame: u64) -> u64 {
+        frame - self.offset
+    }
+    /// The voice's gain at output frame `frame`: gain, fades, distance and pause, without pan.
+    pub fn level(&self, frame: u64) -> f64 {
+        let time = self.time(frame);
+        self.gain.value(time)
+            * self.fade.value(time)
+            * self.distance.value(time)
+            * self.pause.value(time)
+    }
+    /// Product of monotone-ramp maxima: conservative through a decision window,
+    /// including opposite gain/fade directions whose product peaks in between.
+    pub fn level_bound(&self, first: u64, last: u64) -> f64 {
+        let (a, b) = (self.time(first), self.time(last));
+        [&self.gain, &self.fade, &self.distance, &self.pause]
+            .iter()
+            .map(|r| r.value(a).max(r.value(b)))
+            .product()
+    }
+    pub fn update_spatial(
+        &mut self,
+        p: super::Placement,
+        frame: u64,
+        len: u64,
+        curve: FadeCurve,
+        output_channels: usize,
+    ) {
+        let time = self.time(frame);
+        if self.direction.iter().all(|r| r.value(time) == 0.0) {
+            if output_channels == 1 {
+                self.direction[0] = Ramp::constant(1.0);
+            } else {
+                let turns = (self.pan.value(time) + 1.0) / 8.0;
+                self.direction[0] = Ramp::constant(sin_turns(0.25 - turns));
+                self.direction[1] = Ramp::constant(sin_turns(turns));
+            }
+        }
+        for (r, g) in self.direction.iter_mut().zip(p.gains) {
+            r.retarget(time, g, len, curve);
+        }
+        self.distance.retarget(time, p.distance_gain, len, curve);
+        self.doppler.retarget(time, p.doppler, len, curve);
+    }
+    /// Whether the voice is frozen by its own pause.
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+    /// Advances the frozen time by `frames` output frames, while the voice or its bus is paused.
+    pub fn freeze(&mut self, frames: u64) {
+        self.offset += frames;
+    }
+    pub fn pause(&mut self, frame: u64, len: u64, curve: FadeCurve) {
+        if self.done() || self.paused {
+            return;
+        }
+        if len == 0 {
+            self.pause = Ramp::constant(0.0);
+            self.paused = true;
+            self.pausing = false;
+        } else {
+            self.pause.retarget(frame, 0.0, len, curve);
+            self.pausing = true;
+        }
+    }
+    pub fn resume(&mut self, frame: u64, len: u64, curve: FadeCurve) {
+        if self.done() || !(self.paused || self.pausing) {
+            return;
+        }
+        self.paused = false;
+        self.pausing = false;
+        self.pause.retarget(frame, 1.0, len, curve);
+    }
+    /// Reads the source up to the playback position, as the next frame would, so the
+    /// position maps through every loop restart it has passed.
+    pub fn settle(&mut self) {
+        if self.done() {
+            return;
+        }
+        if self.memory_dirty {
+            self.finish_if_exhausted();
+            return;
+        }
+        let index = (self.position >> 32) as i64;
+        match self.fill(index + HALF + 1) {
+            Ok(_) => self.finish_if_exhausted(),
+            Err(e) => self.state = State::Failed(e.code),
+        }
+    }
+    /// Whether the source ended before the playback position, so the next frame would
+    /// end the voice. A voice that reached its end frame exactly at speed 1 has played
+    /// out; one that got there resampling still has the interpolation's tail.
+    fn exhausted(&self) -> bool {
+        let index = (self.position >> 32) as i64;
+        let direct = self.last_step == ONE && self.position & (ONE - 1) == 0;
+        let reach = if direct || self.quality == ResamplingQuality::Linear {
+            0
+        } else {
+            HALF
+        };
+        self.end.is_some_and(|end| index - reach >= end)
+    }
+    /// Finishes a voice whose source is exhausted, as its next frame would, so a voice
+    /// that has played everything stops counting at once.
+    fn finish_if_exhausted(&mut self) {
+        if !self.done() && self.exhausted() {
+            self.state = State::Finished;
+        }
+    }
+    /// The source frame being played, mapped back through loop restarts.
+    pub fn source_position(&self) -> u64 {
+        let index = (self.position >> 32) as i64;
+        if self.memory_dirty {
+            return self.memory_position(index);
+        }
+        let count = self.jump_count.min(JUMPS);
+        let latest = (0..count)
+            .map(|k| self.jumps[(self.jump_count - 1 - k) % JUMPS])
+            .find(|&(at, _)| at <= index)
+            .unwrap_or(self.jumps[(self.jump_count - count) % JUMPS]);
+        let position = latest.1 + index.saturating_sub(latest.0).max(0) as u64;
+        // At high speeds the position can pass the loop's end before the reader has
+        // recorded the restart: wrap it into the loop as the reader will.
+        match self.loop_span {
+            Some((start, end)) if end > start && position >= end => {
+                start + (position - end) % (end - start)
+            }
+            _ => position,
+        }
+    }
+    /// Sets the step and table for the playback speed at `frame`. At speed 1 the voice
+    /// uses its exact step and table, so unpitched voices render as before.
+    fn update_speed(&mut self, frame: u64) {
+        let rate = self.rate.value(frame);
+        let pitch = self.pitch.value(frame);
+        let doppler = self.doppler.value(frame);
+        if rate == 1.0 && pitch == 0.0 && doppler == 1.0 {
+            self.step = self.base_step;
+            self.bank_index = None;
+            return;
+        }
+        // Every accepted rate (1/16..=8), pitch (±48 semitones) and pitch variation
+        // (±24 more) combines to 1/1024..=512, which the fixed-point step represents.
+        if self.pitch_factor.0 != pitch.to_bits() {
+            self.pitch_factor = (pitch.to_bits(), exp2(pitch / 12.0));
+        }
+        let speed = (rate * self.pitch_factor.1 * doppler).clamp(1.0 / 1024.0, 512.0);
+        self.step = ((self.base_step as f64 * speed).round() as u64).max(1);
+        self.bank_index = (self.quality == ResamplingQuality::Sinc)
+            .then(|| SincBank::index(self.base_ratio * speed));
+    }
+    pub fn live(&self) -> bool {
+        self.state == State::Playing
+    }
+    pub fn done(&self) -> bool {
+        matches!(self.state, State::Finished | State::Failed(_))
+    }
+    /// Starts the fade-in at `frame`.
+    pub fn start(&mut self, frame: u64) {
+        let (len, curve) = self.fade_in;
+        if len > 0 {
+            self.fade = Ramp {
+                from: 0.0,
+                to: 1.0,
+                start: frame,
+                len,
+                curve,
+            };
+        }
+    }
+    /// Stops the voice, fading out over `len` frames. A voice paused by itself, or
+    /// `frozen` by its bus, is silent and still, so it stops at once.
+    pub fn stop(&mut self, frame: u64, len: u64, curve: FadeCurve, frozen: bool) {
+        if self.done() {
+            return;
+        }
+        if len == 0 || self.paused || frozen {
+            self.state = State::Finished;
+        } else {
+            self.fade.retarget(frame, 0.0, len, curve);
+            self.state = State::Stopping;
+        }
+    }
+
+    /// Adds `frames` frames from output frame `first` into `out`, interleaved with
+    /// `out_channels` channels. A pause that completes freezes the rest of the block.
+    pub fn render(&mut self, first: u64, frames: usize, out: &mut [f32], out_channels: usize) {
+        self.starved = false;
+        let local = self.time(first);
+        // Ramps only start at segment boundaries, so one finished at `first` stays put.
+        let constant = !self.gain.changing(local)
+            && !self.fade.changing(local)
+            && !self.distance.changing(local)
+            && !self.pan.changing(local)
+            && !self.pause.changing(local);
+        let fixed = (constant && self.emitter.is_none()).then(|| self.gains(local, out_channels));
+        // An emitter whose level and directions hold through the segment uses the same
+        // gains, norm and level on every frame: compute them once.
+        let still = (constant
+            && self.emitter.is_some()
+            && !self.direction[..out_channels]
+                .iter()
+                .any(|r| r.changing(local)))
+        .then(|| {
+            let (gains, norm) = self.directions(local, out_channels);
+            (gains, norm, self.level(first))
+        });
+        let speeding =
+            self.rate.changing(local) || self.pitch.changing(local) || self.doppler.changing(local);
+        self.update_speed(local);
+        for j in 0..frames {
+            if self.done() {
+                return;
+            }
+            let time = local + j as u64;
+            if speeding {
+                self.update_speed(time);
+            }
+            let Some((left, right)) = self.next_frame() else {
+                return;
+            };
+            if self.emitter.is_some() {
+                let (gains, norm, level) = still.unwrap_or_else(|| {
+                    let (gains, norm) = self.directions(time, out_channels);
+                    (gains, norm, self.level(first + j as u64))
+                });
+                let value = if self.channels == 1 {
+                    left
+                } else {
+                    (left + right) * 0.5
+                } * level;
+                if norm > 0.0 {
+                    for c in 0..out_channels {
+                        out[j * out_channels + c] += (value * gains[c] / norm) as f32;
+                    }
+                }
+            } else {
+                let (gl, gr) = fixed.unwrap_or_else(|| self.gains(time, out_channels));
+                if out_channels == 1 {
+                    out[j] += (left * gl + right * gr) as f32;
+                } else {
+                    out[out_channels * j] += (left * gl) as f32;
+                    out[out_channels * j + 1] += (right * gr) as f32;
+                }
+            }
+            if self.complete_frame(time, frames - j - 1) {
+                return;
+            }
+        }
+    }
+    fn complete_frame(&mut self, time: u64, remaining: usize) -> bool {
+        if self.state == State::Stopping && self.fade.finished(time + 1) {
+            self.state = State::Finished;
+        }
+        if self.pausing && self.pause.finished(time + 1) {
+            self.pausing = false;
+            self.paused = true;
+            if self.state == State::Stopping {
+                self.state = State::Finished;
+                return true;
+            }
+            self.freeze(remaining as u64);
+            return true;
+        }
+        false
+    }
+    /// Advance timing/DSP without interpolation, pan or mixing. Constant-speed
+    /// memory playback skips in O(1); stateful streams must still consume PCM.
+    pub fn advance(&mut self, first: u64, frames: usize) {
+        if self.done() {
+            return;
+        }
+        self.starved = false;
+        let local = self.time(first);
+        let speeding =
+            self.rate.changing(local) || self.pitch.changing(local) || self.doppler.changing(local);
+        self.update_speed(local);
+        if let Feed::Memory(audio) = &self.feed {
+            self.end = if self.loop_span.is_some_and(|(a, b)| b > a) {
+                None
+            } else {
+                Some(audio.frames().saturating_sub(self.memory_origin as usize) as i64)
+            };
+            self.memory_dirty = true;
+            if self.exhausted() {
+                self.state = State::Finished;
+                return;
+            }
+            if !speeding
+                && !self.pausing
+                && self.state == State::Playing
+                && self.last_step == self.step
+            {
+                let reach = if self.quality == ResamplingQuality::Linear
+                    || (self.last_step == ONE && self.position & (ONE - 1) == 0)
+                {
+                    0
+                } else {
+                    HALF as u128
+                };
+                let available = self.end.map_or(frames as u128, |end| {
+                    let until = (end as u128 + reach) * ONE as u128;
+                    until
+                        .saturating_sub(self.position as u128)
+                        .div_ceil(self.step as u128)
+                        .min(frames as u128)
+                });
+                let position = self.position as u128 + self.step as u128 * available;
+                if position > u64::MAX as u128 {
+                    self.state = State::Failed(ErrorCode::LimitExceeded);
+                    return;
+                }
+                self.position = position as u64;
+                self.last_step = self.step;
+                if available < frames as u128 {
+                    self.state = State::Finished;
+                }
+                return;
+            }
+        }
+        for j in 0..frames {
+            if self.done() {
+                return;
+            }
+            let time = local + j as u64;
+            if speeding {
+                self.update_speed(time);
+            }
+            if self.memory_dirty {
+                if self.exhausted() {
+                    self.state = State::Finished;
+                    return;
+                }
+                let Some(next) = self.position.checked_add(self.step) else {
+                    self.state = State::Failed(ErrorCode::LimitExceeded);
+                    return;
+                };
+                self.position = next;
+                self.last_step = self.step;
+            } else if self.next_frame_mode(false).is_none() {
+                return;
+            }
+            if self.complete_frame(time, frames - j - 1) {
+                return;
+            }
+        }
+    }
+    fn memory_position(&self, index: i64) -> u64 {
+        let origin = match self.loop_span {
+            Some((start, end)) if end > start && self.memory_origin >= end => start,
+            _ => self.memory_origin,
+        };
+        let position = origin + index.max(0) as u64;
+        match self.loop_span {
+            Some((start, end)) if end > start && position >= end => {
+                start + (position - end) % (end - start)
+            }
+            _ => position,
+        }
+    }
+    fn rebuild_memory(&mut self) {
+        let length = match &self.feed {
+            Feed::Memory(a) => a.frames() as u64,
+            Feed::Stream(_) => return,
+        };
+        let index = (self.position >> 32) as i64;
+        let from = if self.quality == ResamplingQuality::Sinc {
+            (index - HALF + 1).max(0)
+        } else {
+            index
+        };
+        self.source_pos = self.memory_position(from).min(length);
+        self.filled = from;
+        self.end = if self.loop_span.is_some_and(|(a, b)| b > a) {
+            None
+        } else {
+            let end = length.saturating_sub(self.memory_origin) as i64;
+            (from >= end).then_some(end)
+        };
+        self.jumps[0] = (from, self.source_pos);
+        self.jump_count = 1;
+        self.memory_dirty = false;
+    }
+    /// The emitter's direction gains for the output channels at voice time `time`, and
+    /// their norm. Channels beyond `out_channels` stay zero and are never read.
+    fn directions(&self, time: u64, out_channels: usize) -> ([f64; 8], f64) {
+        let mut gains = [0.0; 8];
+        for (g, r) in gains.iter_mut().zip(&self.direction[..out_channels]) {
+            *g = r.value(time);
+        }
+        let norm = gains[..out_channels]
+            .iter()
+            .map(|g| g * g)
+            .sum::<f64>()
+            .sqrt();
+        (gains, norm)
+    }
+    /// Gains applied to the source's left and right samples (equal for mono).
+    ///
+    /// A mono source is panned with a constant-power law: `cos θ` and `sin θ` with
+    /// `θ = (pan + 1)·π/4`, so the centre is -3 dB on each side. A stereo source is
+    /// balanced: the far side follows `√2·cos θ` or `√2·sin θ`, limited to 1, so the
+    /// centre leaves both channels unchanged. Mono output sums mono sources at unit
+    /// gain and averages stereo ones.
+    fn gains(&self, time: u64, out_channels: usize) -> (f64, f64) {
+        let gain = self.gain.value(time)
+            * self.fade.value(time)
+            * self.distance.value(time)
+            * self.pause.value(time);
+        if out_channels == 1 {
+            return if self.channels == 1 {
+                (gain, 0.0)
+            } else {
+                (gain / 2.0, gain / 2.0)
+            };
+        }
+        let turns = (self.pan.value(time).clamp(-1.0, 1.0) + 1.0) / 8.0;
+        let (l, r) = (sin_turns(0.25 - turns), sin_turns(turns));
+        if self.channels == 1 {
+            (gain * l, gain * r)
+        } else {
+            let s = std::f64::consts::SQRT_2;
+            (gain * (s * l).min(1.0), gain * (s * r).min(1.0))
+        }
+    }
+
+    /// Returns the next interpolated source frame, or `None` once the voice ended.
+    fn next_frame(&mut self) -> Option<(f64, f64)> {
+        self.next_frame_mode(true)
+    }
+    fn next_frame_mode(&mut self, interpolate: bool) -> Option<(f64, f64)> {
+        if self.memory_dirty {
+            self.rebuild_memory();
+        }
+        if self.starved {
+            return Some((0.0, 0.0));
+        }
+        let index = (self.position >> 32) as i64;
+        let frac = self.position & (ONE - 1);
+        let direct = self.step == ONE && frac == 0;
+        if self.exhausted() {
+            self.state = State::Finished;
+            return None;
+        }
+        match self.fill(index + HALF + 1) {
+            Ok(true) => (),
+            Ok(false) => {
+                self.starved = true;
+                return Some((0.0, 0.0));
+            }
+            Err(e) => {
+                self.state = State::Failed(e.code);
+                return None;
+            }
+        }
+        let ch = self.channels;
+        let sample = |i: i64, c: usize| -> f64 {
+            if i < 0 {
+                0.0
+            } else {
+                self.ring[(i as usize % RING) * ch + c] as f64
+            }
+        };
+        let value = if !interpolate {
+            (0.0, 0.0)
+        } else if direct {
+            (sample(index, 0), sample(index, ch - 1))
+        } else if self.quality == ResamplingQuality::Linear {
+            let t = frac as f64 / ONE as f64;
+            let l = sample(index, 0);
+            let r = sample(index, ch - 1);
+            (
+                l + (sample(index + 1, 0) - l) * t,
+                r + (sample(index + 1, ch - 1) - r) * t,
+            )
+        } else {
+            let bank = &self.bank.tables;
+            let table = match self.bank_index {
+                Some(i) => &bank[i],
+                // A voice at the output rate whose position is between frames after a
+                // speed change uses the table for ratio 1.
+                None => self.table.as_deref().unwrap_or(&bank[0]),
+            };
+            let scaled = frac as f64 / ONE as f64 * PHASES as f64;
+            let p = (scaled as usize).min(PHASES - 1);
+            let t = scaled - p as f64;
+            let (a, b) = (&table.rows[p], &table.rows[p + 1]);
+            let (mut l, mut r) = (0.0, 0.0);
+            for k in 0..16 {
+                let h = a[k] + (b[k] - a[k]) * t;
+                let i = index + k as i64 - HALF + 1;
+                l += h * sample(i, 0);
+                r += h * sample(i, ch - 1);
+            }
+            (l, r)
+        };
+        self.position += self.step;
+        self.last_step = self.step;
+        Some(value)
+    }
+
+    /// Buffers virtual frames up to `until`, applying the loop and reading ahead.
+    fn fill(&mut self, until: i64) -> Result<bool> {
+        let ch = self.channels;
+        while self.filled < until {
+            let at = self.filled as usize % RING;
+            let space = (RING - at).min(READ);
+            let slot = &mut self.ring[at * ch..(at + space) * ch];
+            if self.end.is_some() {
+                slot.fill(0.0);
+                self.filled += space as i64;
+                continue;
+            }
+            let limit = match self.looping {
+                Some((_, Some(end))) => (end.saturating_sub(self.source_pos) as usize).min(space),
+                _ => space,
+            };
+            let read = if limit == 0 {
+                0
+            } else {
+                match &mut self.feed {
+                    Feed::Memory(audio) => {
+                        let data = audio.all_channels();
+                        let from = self.source_pos as usize;
+                        let n = limit.min(data[0].len().saturating_sub(from));
+                        for (c, channel) in data.iter().enumerate() {
+                            for (i, &s) in channel[from..from + n].iter().enumerate() {
+                                slot[i * ch + c] = s;
+                            }
+                        }
+                        n
+                    }
+                    Feed::Stream(stream) => match stream.read(&mut slot[..limit * ch]) {
+                        Ok(n) => n,
+                        Err(e) if e.code == ErrorCode::Underrun => return Ok(false),
+                        Err(e) => return Err(e),
+                    },
+                }
+            };
+            if read > 0 {
+                self.source_pos += read as u64;
+                self.filled += read as i64;
+                continue;
+            }
+            // The source or the loop region ended.
+            match self.looping {
+                Some((start, _)) if self.source_pos > start => {
+                    if let Feed::Stream(stream) = &mut self.feed {
+                        stream.seek(start)?;
+                    }
+                    // A stream of unknown length shows its loop's end at the first restart.
+                    if self.loop_span.is_none() {
+                        self.loop_span = Some((start, self.source_pos));
+                    }
+                    self.source_pos = start;
+                    self.jumps[self.jump_count % JUMPS] = (self.filled, start);
+                    self.jump_count += 1;
+                }
+                _ => self.end = Some(self.filled),
+            }
+        }
+        Ok(true)
+    }
+}

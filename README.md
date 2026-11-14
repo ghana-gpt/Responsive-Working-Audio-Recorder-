@@ -19,16 +19,16 @@ the microphone stream leaks after every take, downloads pile up one click at a
 time and nothing survives a reload. This rewrite keeps the "just open the page"
 promise while fixing the engineering:
 
-| Problem in the naive version                     | What this version does                                                                 |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Impossible UI states (stop clickable while idle) | A typed state machine (`scripts/modules/state.js`) validates every transition          |
-| Microphone stays open after stop                 | The stream and `AudioContext` are released on stop, cancel **and** `pagehide`          |
-| Hard-coded `audio/webm`                          | Capability detection picks the best supported container; WAV and MP3 are encoded in JS |
-| Recordings vanish on reload                      | IndexedDB repository with an in-memory cache in front                                  |
-| Recording duration includes pauses               | Elapsed time excludes paused intervals                                                 |
-| One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                                  |
-| English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                                 |
-| Untested                                         | 188 unit tests, HTML/service-worker validation and a 21-step e2e suite                 |
+| Problem in the naive version                     | What this version does                                                                   |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Impossible UI states (stop clickable while idle) | A typed state machine (`scripts/modules/state.js`) validates every transition            |
+| Microphone stays open after stop                 | The stream and `AudioContext` are released on stop, cancel **and** `pagehide`            |
+| Hard-coded `audio/webm`                          | Capability detection picks the best supported container; WAV and MP3 are encoded locally |
+| Recordings vanish on reload                      | IndexedDB repository with an in-memory cache in front                                    |
+| Recording duration includes pauses               | Elapsed time excludes paused intervals                                                   |
+| One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                                    |
+| English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                                   |
+| Untested                                         | 201 unit tests, HTML/service-worker validation, 21 recorder + 13 transcript e2e steps    |
 
 ## Features
 
@@ -53,12 +53,13 @@ promise while fixing the engineering:
   panel next to the recorder (indeterminate while decoding, which browsers cannot
   report on) and can be cancelled mid-way: nothing is saved and the library is untouched.
 - **Local MP3 export** — pick MP3 and the capture is re-encoded on the device by a
-  vendored [lamejs](https://github.com/zhuker/lamejs) build (LGPL-3.0, see
-  [`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md)). The encoder is a
-  separate same-origin script loaded on first use and precached for offline use, so the
-  initial shell stays small; it reports through the same progress panel and honours the
-  same Cancel button as the WAV path. Where a browser can record MP3 itself, that native
-  path is used and the encoder is never downloaded.
+  WebAssembly build of the [audiobox](https://crates.io/crates/audiobox) MPEG-1 Layer III
+  encoder (MIT, see [`vendor/audiobox/NOTICE.md`](vendor/audiobox/NOTICE.md)). The encoder
+  runs in a dedicated module worker, started on first use and precached for offline use, so
+  the initial shell stays small and long exports keep the page responsive; it reports
+  through the same progress panel and honours the same Cancel button as the WAV path.
+  Where a browser can record MP3 itself, that native path is used and the encoder is never
+  loaded.
 - **Transcription** — on-device speech-to-text with a vendored
   [transformers.js](https://github.com/huggingface/transformers.js) runtime
   (Apache-2.0, see [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md))
@@ -105,8 +106,8 @@ and ES module imports require an origin — always use the dev server or a stati
 | Browser           | Recording | Notes                                            |
 | ----------------- | --------- | ------------------------------------------------ |
 | Chrome / Edge 90+ | ✅        | WebM/Opus by default, MP4/AAC when available     |
-| Firefox 90+       | ✅        | Ogg/Opus, WebM; MP3 via the JS encoder           |
-| Safari 15+        | ✅        | MP4/AAC; WAV and MP3 export via the JS encoders  |
+| Firefox 90+       | ✅        | Ogg/Opus, WebM; MP3 via the bundled encoder      |
+| Safari 15+        | ✅        | MP4/AAC; WAV and MP3 export via the bundled code |
 | iOS Safari 15+    | ✅        | Use headphones during playback to avoid feedback |
 
 Automated end-to-end coverage currently runs in Chromium only. The Firefox, Safari and
@@ -142,7 +143,9 @@ button/link has focus, so they never steal a keystroke from an active control.
 ├── manifest.webmanifest        # PWA metadata (installable)
 ├── service-worker.js           # Offline shell cache (network-first navigations)
 ├── icons/                      # Generated SVG + PNG icons (192/512/maskable)
-├── vendor/lamejs-1.2.1/        # Vendored MP3 encoder (LGPL-3.0, see NOTICE.md)
+├── vendor/audiobox/            # Committed MP3 encoder .wasm + digests (MIT, see NOTICE.md)
+├── vendor/audiobox-0.5.1/      # audiobox crate sources the .wasm is built from (MIT)
+├── encoder/                    # Rust bridge crate exposing audiobox through a tiny ABI
 ├── vendor/transformers/        # Vendored ASR runtime (Apache-2.0, see NOTICE.md)
 ├── models/whisper-tiny/        # Quantized Whisper tiny ONNX model + tokenizer
 ├── styles/main.css             # Design tokens, layout, components, themes
@@ -155,7 +158,9 @@ button/link has focus, so they never steal a keystroke from an active control.
 │       ├── asr-worker.js       # Module worker that runs transformers.js off-thread
 │       ├── live-transcript.js  # Opt-in live caption preview (4–15 s slices)
 │       ├── mime.js             # Format capability ladder
-│       ├── mp3.js              # MP3 encoder adapter (vendored lamejs, chunked)
+│       ├── mp3.js              # MP3 export adapter: validation, progress, cancellation
+│       ├── mp3-worker.js       # Module worker that loads the WASM encoder and encodes
+│       ├── mp3-wasm.js         # WASM bridge loader + encoder wrapper (used by the worker)
 │       ├── store.js            # Recording repository (cache + IndexedDB)
 │       ├── db.js               # IndexedDB access, storage quota helpers
 │       ├── library.js          # Pure search/sort/stats helpers
@@ -177,6 +182,7 @@ button/link has focus, so they never steal a keystroke from an active control.
 │       └── settings-view.js    # Preferences view (dumb)
 ├── tools/
 │   ├── dev-server.mjs          # Zero-dependency static server (also used by e2e)
+│   ├── build-mp3-wasm.mjs      # Builds the encoder .wasm, records/verifies its digests
 │   ├── validate-html.mjs       # Markup, manifest, SW and i18n validator
 │   └── generate-icons.mjs      # Draws the PNG icons with no dependencies
 └── tests/
@@ -195,17 +201,19 @@ test can assert real behaviour while the unit tests run in milliseconds.
 
 ## Scripts
 
-| Command                 | What it does                                     |
-| ----------------------- | ------------------------------------------------ |
-| `npm start`             | Serve the app at <http://127.0.0.1:4173>         |
-| `npm test`              | Unit tests (`node:test`, no framework)           |
-| `npm run test:e2e`      | Real Chromium flow with a fake microphone        |
-| `npm run test:e2e:asr`  | Same browser, stubbed Whisper worker, transcript |
-| `npm run lint`          | ESLint (flat config, browser + Node globals)     |
-| `npm run format`        | Prettier write                                   |
-| `npm run validate:html` | Markup, manifest, service-worker and i18n checks |
-| `npm run icons`         | Regenerate the PNG icons                         |
-| `npm run verify`        | `validate` + unit tests + e2e — what CI runs     |
+| Command                 | What it does                                      |
+| ----------------------- | ------------------------------------------------- |
+| `npm start`             | Serve the app at <http://127.0.0.1:4173>          |
+| `npm test`              | Unit tests (`node:test`, no framework)            |
+| `npm run test:e2e`      | Real Chromium flow with a fake microphone         |
+| `npm run test:e2e:asr`  | Same browser, stubbed Whisper worker, transcript  |
+| `npm run lint`          | ESLint (flat config, browser + Node globals)      |
+| `npm run format`        | Prettier write                                    |
+| `npm run validate:html` | Markup, manifest, service-worker and i18n checks  |
+| `npm run build:wasm`    | Rebuild the MP3 encoder with `cargo` (needs Rust) |
+| `npm run check:wasm`    | Verify the committed `.wasm` matches its sources  |
+| `npm run icons`         | Regenerate the PNG icons                          |
+| `npm run verify`        | `validate` + unit tests + e2e — what CI runs      |
 
 ## Testing
 
@@ -216,9 +224,10 @@ npm run verify
 
 - **Unit tests** cover the pure modules: WAV encoding (cross-checked with `ffprobe`
   when available), the conversion contract (stage progress, cancellation, chunked
-  encoder parity with the synchronous one), the MP3 encoder adapter (mono/stereo PCM
-  conversion, frame progress, cancellation before and during encoding, input
-  validation), ZIP writing and reading (`unzip -t`, ZIP64,
+  encoder parity with the synchronous one), the MP3 export adapter and the WASM encoder
+  (validation, progress and cancellation on a fake worker; the committed `.wasm` against
+  the digest in `build-info.json`, its output parsed frame by frame and cross-checked with
+  `ffprobe`/`ffmpeg` when they are installed), ZIP writing and reading (`unzip -t`, ZIP64,
   CRC failures, DEFLATE inflation), MIME fallbacks, search/sort/stats, sanitising,
   formatting, state transitions and i18n key parity — plus the static dev server (MIME
   types, `no-store`, app-shell fallback, 404s and path containment), transcription
@@ -250,8 +259,10 @@ npm run verify
 The app is static files — any host works (GitHub Pages, Netlify, S3, nginx).
 
 - **GitHub Pages**: `.github/workflows/deploy-pages.yml` publishes `index.html`,
-  `manifest.webmanifest`, `service-worker.js`, `icons/`, `scripts/` and `styles/` on
-  every push to `main`.
+  `manifest.webmanifest`, `service-worker.js`, `icons/`, `scripts/`, `styles/` and the
+  runtime parts of `vendor/` on every push to `main`. The encoder's crate sources
+  (`vendor/audiobox-0.5.1/`, `encoder/`) are repository-only; the site ships the compiled
+  `mp3-encoder.wasm`.
 - **Your own server**: serve the repository root over **https** (or `localhost`).
   Microphone access, service workers and IndexedDB are all gated on a secure context.
 - After changing any precached file, bump `VERSION` in `service-worker.js` so browsers
@@ -284,9 +295,10 @@ Issues and pull requests are welcome — please read
 - Sponsored by [Ghana-GPT.com](https://ghana-gpt.com) — a static footer credit that you
   can turn off in Preferences.
 - Icons are drawn by `tools/generate-icons.mjs`; no icon library is bundled.
-- MP3 encoding: [lamejs](https://github.com/zhuker/lamejs) 1.2.1 by Alex Zhukov, a port
-  of LAME, vendored unmodified — see
-  [`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md).
+- MP3 encoding: the [audiobox](https://crates.io/crates/audiobox) 0.5.1 MPEG-1 Layer III
+  encoder (MIT), compiled to WebAssembly by `tools/build-mp3-wasm.mjs` — see
+  [`vendor/audiobox/NOTICE.md`](vendor/audiobox/NOTICE.md) for provenance, the bridge ABI
+  and rebuild instructions.
 - Speech-to-text: [transformers.js](https://github.com/huggingface/transformers.js) and
   [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Apache-2.0) plus the
   quantized [`whisper-tiny`](https://huggingface.co/openai/whisper-tiny) model, all
@@ -297,7 +309,9 @@ Issues and pull requests are welcome — please read
 
 This application's own code is [MIT](LICENSE) © 2026 Imoro Abubakari.
 
-Third-party components keep their own licences: the bundled MP3 encoder (lamejs) is
-**LGPL-3.0**, not MIT. It is loaded as a separate script, shipped unmodified together
-with its sources, and attributed in the app footer — the obligations are spelled out in
-[`vendor/lamejs-1.2.1/NOTICE.md`](vendor/lamejs-1.2.1/NOTICE.md).
+Third-party components keep their own licences: the bundled MP3 encoder is audiobox 0.5.1
+(**MIT**, compiled to WebAssembly from the sources in `vendor/audiobox-0.5.1/` with the
+bridge in `encoder/`) and the speech-to-text runtime is **Apache-2.0**. Both ship with a
+`NOTICE.md` that records provenance and attribution —
+[`vendor/audiobox/NOTICE.md`](vendor/audiobox/NOTICE.md),
+[`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md).

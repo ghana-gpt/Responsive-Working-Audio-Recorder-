@@ -1,0 +1,115 @@
+[package]
+name = "audiobox"
+version = "0.5.1"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Jose Sanchez <jose.sansan@proton.me>"]
+description = "Zero-dependency, safe Rust audio: decode, edit, analyze, encode and stream WAV, FLAC, MP3, Vorbis and Opus, plus a real-time game mixer, an 8-bit chiptune synthesizer and sfxr-style sound effects"
+license = "MIT"
+repository = "https://github.com/jmsansan/audiobox-rs"
+homepage = "https://jmsansan.github.io/audiobox-rs/"
+documentation = "https://docs.rs/audiobox"
+readme = "README.md"
+keywords = ["audio", "gamedev", "mp3", "flac", "synthesizer"]
+categories = ["multimedia::audio", "multimedia::encoding", "game-development", "encoding", "wasm"]
+include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/docs/*.md", "/benches/engine.rs", "/examples/*.rs", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+
+[features]
+default = []
+# 8-bit style synthesizer and text score format (`audiobox::synth`).
+synth = []
+# Parametric sound-effect generator (`audiobox::sfx`). Enables `synth`.
+sfx = ["synth"]
+# Real-time mixer for games (`audiobox::mixer`).
+mixer = []
+# Beat/bar-aligned music transitions, cues and intensity layers.
+music = ["mixer"]
+# Designer-editable named sound events, resolved before playback.
+events = ["mixer"]
+# Background loading and a budgeted cache of decoded sounds (`audiobox::assets`).
+assets = []
+# Native background disk streaming with bounded buffers (`stream::FileStream`).
+file-stream = []
+
+[dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+name = "engine"
+harness = false
+required-features = ["sfx", "mixer"]
+
+[[example]]
+name = "chiptune"
+required-features = ["synth"]
+
+[[example]]
+name = "prepared_synth"
+required-features = ["synth"]
+
+[[example]]
+name = "synth_controls"
+required-features = ["synth"]
+
+[[example]]
+name = "sfx"
+required-features = ["sfx"]
+
+[[example]]
+name = "game_audio"
+required-features = ["mixer", "sfx"]
+
+[[example]]
+name = "load_assets"
+required-features = ["assets"]
+
+[[example]]
+name = "adaptive_music"
+required-features = ["music", "synth"]
+
+[[example]]
+name = "bus_effects"
+required-features = ["mixer"]
+
+[[example]]
+name = "group_sends"
+required-features = ["mixer"]
+
+[[example]]
+name = "virtual_voices"
+required-features = ["mixer"]
+
+[[example]]
+name = "colour_effects"
+required-features = ["mixer"]
+
+[[example]]
+name = "drum_kits"
+required-features = ["synth"]
+
+[[example]]
+name = "tracker_instruments"
+required-features = ["synth"]
+
+[[example]]
+name = "stream_from_disk"
+required-features = ["file-stream", "mixer"]
+
+[[example]]
+name = "spatial_audio"
+required-features = ["mixer"]
+
+[[example]]
+name = "sound_events"
+required-features = ["events", "sfx"]
+
+[[example]]
+name = "synthwave"
+required-features = ["synth"]
+
+[[example]]
+name = "keyboard_voices"
+required-features = ["synth"]

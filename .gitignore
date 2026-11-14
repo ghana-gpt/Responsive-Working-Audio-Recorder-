@@ -17,3 +17,7 @@ Thumbs.db
 # Local environment
 .env
 .env.local
+
+# Rust build output for the WebAssembly MP3 encoder (`npm run build:wasm`).
+# The built binary itself is committed under vendor/audiobox/.
+encoder/target/

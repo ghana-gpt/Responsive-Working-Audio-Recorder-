@@ -1,6 +1,6 @@
 {
   "name": "responsive-working-audio-recorder",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "description": "A responsive, accessible, offline-capable audio recorder that runs entirely in the browser. No server, no tracking, MIT licensed.",
@@ -41,7 +41,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "validate:html": "node tools/validate-html.mjs",
-    "validate": "npm run validate:html && npm run lint && npm run test",
+    "check:wasm": "node tools/build-mp3-wasm.mjs --check",
+    "build:wasm": "node tools/build-mp3-wasm.mjs",
+    "validate": "npm run validate:html && npm run check:wasm && npm run lint && npm run test",
     "verify": "npm run validate && npm run test:e2e && npm run test:e2e:asr",
     "icons": "node tools/generate-icons.mjs"
   },

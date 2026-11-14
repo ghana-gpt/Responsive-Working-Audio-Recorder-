@@ -120,15 +120,15 @@ export async function convertToWav(blob, options = {}) {
 
 /**
  * Convert a recorded blob to MP3 using the shared progress and cancellation
- * contract. Decode progress is indeterminate; the encoder reports frames done.
+ * contract. Decode progress is indeterminate; the encoder runs in a worker and
+ * is opaque for the duration of its single WASM call, so that phase reports an
+ * indeterminate bar too — the panel still shows the stage and can be cancelled.
  *
  * @param {Blob} blob
  * @param {{
  *   bitrate?: number,
  *   signal?: AbortSignal|null,
  *   onProgress?: ((progress: { stage: string, fraction: number|null }) => void)|null,
- *   chunkFrames?: number,
- *   yieldFn?: (() => Promise<void>)|null,
  * }} [options]
  * @returns {Promise<Blob>}
  */
@@ -143,8 +143,6 @@ export async function convertToMp3(blob, options = {}) {
     return await encodeMp3Async(channels, buffer.sampleRate, options.bitrate ?? 96_000, {
       signal: task.signal,
       onProgress: (fraction) => task.report('encode', fraction),
-      chunkFrames: options.chunkFrames,
-      yieldFn: options.yieldFn,
     });
   } finally {
     task.dispose();

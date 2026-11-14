@@ -31,16 +31,16 @@ jobs:
         run: npm ci
 
       - name: Validate before deploying
-        run: |
-          npm run validate:html
-          npm run lint
-          npm test
+        run: npm run validate
 
       - name: Assemble the site
         run: |
           mkdir -p _site
           cp index.html manifest.webmanifest service-worker.js LICENSE README.md _site/
           cp -r icons scripts styles vendor _site/
+          # The site needs vendor/audiobox/mp3-encoder.wasm, not the crate sources
+          # it was built from — those stay in the repository for `npm run build:wasm`.
+          rm -rf _site/vendor/audiobox-0.5.1
           # The Whisper model and the ONNX runtime binary ship with the site so
           # transcription works offline, with no CDN and no server.
           cp -r models _site/

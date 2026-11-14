@@ -16,7 +16,7 @@
  * Recordings never touch the cache: they live in IndexedDB and blob: URLs.
  */
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 const CACHE_NAME = `audio-recorder-shell-${VERSION}`;
 
 /** Files that make up the installable app shell (all relative to the scope). */
@@ -40,6 +40,8 @@ const SHELL_ASSETS = [
   './scripts/modules/library-view.js',
   './scripts/modules/live-transcript.js',
   './scripts/modules/mime.js',
+  './scripts/modules/mp3-wasm.js',
+  './scripts/modules/mp3-worker.js',
   './scripts/modules/mp3.js',
   './scripts/modules/recorder.js',
   './scripts/modules/recorder-view.js',
@@ -52,10 +54,9 @@ const SHELL_ASSETS = [
   './scripts/modules/wav.js',
   './scripts/modules/zip.js',
   './scripts/modules/zip-reader.js',
-  './vendor/lamejs-1.2.1/lame.min.js',
-  './vendor/lamejs-1.2.1/LICENSE.LGPL-3.0.txt',
-  './vendor/lamejs-1.2.1/LICENSE.GPL-3.0.txt',
-  './vendor/lamejs-1.2.1/NOTICE.md',
+  './vendor/audiobox/NOTICE.md',
+  './vendor/audiobox/mp3-encoder.wasm',
+  './vendor/audiobox-0.5.1/LICENSE',
   './vendor/transformers/NOTICE.md',
   './vendor/transformers/LICENSE',
   './vendor/transformers/LICENSE.onnxruntime',

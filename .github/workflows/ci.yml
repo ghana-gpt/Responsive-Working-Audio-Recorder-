@@ -37,6 +37,9 @@ jobs:
       - name: Validate markup, manifest and service worker
         run: npm run validate:html
 
+      - name: Verify the committed MP3 encoder
+        run: npm run check:wasm
+
       - name: Lint
         run: npm run lint
 

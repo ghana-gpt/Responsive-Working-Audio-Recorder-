@@ -526,7 +526,7 @@ async function main() {
 
     await step('saves an MP3 capture through the local encoder', async () => {
       // No browser records MP3 natively, so this radio can only be enabled
-      // because the vendored lamejs build is served from this origin.
+      // because the bundled WebAssembly encoder is served from this origin.
       const mp3Radio = '#format-options input[name="format"][value="mp3"]';
       assert.equal(
         await page.$eval(mp3Radio, (input) => !input.disabled),

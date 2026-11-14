@@ -309,7 +309,7 @@ export const messages = {
 
     'footer.rights': '© {year} Audio Recorder — released under the MIT licence.',
     'footer.license': 'MIT licence',
-    'footer.encoderLicense': 'MP3 encoder: lamejs 1.2.1 (LGPL-3.0)',
+    'footer.encoderLicense': 'MP3 encoder: audiobox 0.5.1 (MIT)',
     'footer.asrLicense': 'Speech model: Whisper tiny (MIT)',
     'footer.source': 'Source code',
     'footer.linksLabel': 'Project links',
@@ -625,7 +625,7 @@ export const messages = {
 
     'footer.rights': '© {year} Enregistreur audio — publié sous licence MIT.',
     'footer.license': 'Licence MIT',
-    'footer.encoderLicense': 'Encodeur MP3 : lamejs 1.2.1 (LGPL-3.0)',
+    'footer.encoderLicense': 'Encodeur MP3 : audiobox 0.5.1 (MIT)',
     'footer.asrLicense': 'Modèle vocal : Whisper tiny (MIT)',
     'footer.source': 'Code source',
     'footer.linksLabel': 'Liens du projet',

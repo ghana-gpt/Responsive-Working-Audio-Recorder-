@@ -1,0 +1,25 @@
+[package]
+name = "recorder-mp3-encoder"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+description = "WebAssembly bridge that exposes the vendored audiobox MPEG-1 Layer III encoder to the recorder"
+license = "MIT"
+
+# Only the CDylib is needed: the recorder loads the resulting `.wasm` directly,
+# with no wasm-bindgen, no JS glue package and no third-party crates.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+audiobox = { path = "../vendor/audiobox-0.5.1", default-features = false }
+
+# Same knobs the upstream project uses for its own browser build: optimise for
+# size, inline everything, abort on panic (no unwinding machinery).
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
