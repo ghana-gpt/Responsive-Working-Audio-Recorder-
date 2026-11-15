@@ -43,6 +43,9 @@
     "validate:html": "node tools/validate-html.mjs",
     "check:wasm": "node tools/build-mp3-wasm.mjs --check",
     "build:wasm": "node tools/build-mp3-wasm.mjs",
+    "models:download": "node tools/models.mjs download",
+    "models:verify": "node tools/models.mjs verify",
+    "models:package": "node tools/models.mjs package",
     "validate": "npm run validate:html && npm run check:wasm && npm run lint && npm run test",
     "verify": "npm run validate && npm run test:e2e && npm run test:e2e:asr",
     "icons": "node tools/generate-icons.mjs"

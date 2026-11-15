@@ -4,12 +4,15 @@
  * Runs Transformers.js + ONNX Runtime Web off the main thread so a long decode
  * never freezes the recorder UI. Everything it loads is served from this origin:
  *
- *   models/whisper-tiny/       the quantised ONNX graphs + tokenizer + configs
+ *   models/whisper-tiny/       the quantised ONNX graphs + tokenizer + configs,
+ *                              installed by `npm run models:download`
  *   vendor/transformers/       transformers.min.js + ort-wasm-simd.wasm
  *
  * `allowRemoteModels` is off, so a missing local file is a hard error instead of
  * a quiet request to the Hugging Face Hub — the app's offline promise depends on
- * that.
+ * that. The release asset is only fetched by the developer-facing download
+ * script, never by this worker, which also means a clone without the model still
+ * starts and simply reports that transcription is unavailable.
  */
 
 import { env, pipeline } from '../../vendor/transformers/transformers.min.js';
@@ -17,6 +20,7 @@ import {
   ASR_SAMPLE_RATE,
   ASR_WINDOW_SECONDS,
   SILENCE_RMS,
+  isModelAvailable,
   mergeWindows,
   planWindows,
   resampleLinear,
@@ -24,6 +28,7 @@ import {
 } from './asr.js';
 
 const MODEL_ROOT = new URL('../../models/', import.meta.url).href;
+const MODEL_ENTRY = new URL('whisper-tiny/', MODEL_ROOT).href;
 const RUNTIME_ROOT = new URL('../../vendor/transformers/', import.meta.url).href;
 
 env.allowRemoteModels = false; // never fetch from a CDN/Hub at runtime
@@ -117,6 +122,9 @@ async function runTranscription(id, request) {
     post({ type: 'cancelled', id });
     return;
   }
+  // Some files report no `total`, so the averaged progress can stop short of 1;
+  // say "loaded" explicitly once the pipeline is really ready.
+  post({ type: 'progress', id, stage: 'load', fraction: 1 });
 
   const sourceRate = Number(request.sampleRate) || ASR_SAMPLE_RATE;
   const source = request.samples instanceof Float32Array ? request.samples : new Float32Array(0);
@@ -192,10 +200,13 @@ self.addEventListener('message', async (event) => {
     await runTranscription(data.id, data);
   } catch (error) {
     console.error('[asr-worker] failed', error);
+    // Distinguish "this browser cannot decode" from "the files were never
+    // installed": the UI can only tell the user what to do in the second case.
+    const code = (await isModelAvailable(MODEL_ENTRY)) ? 'asrFailed' : 'modelMissing';
     post({
       type: 'error',
       id: data.id,
-      code: 'asrFailed',
+      code,
       message: String(error?.message ?? error ?? 'Transcription failed'),
     });
   }

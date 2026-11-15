@@ -335,6 +335,32 @@ function defaultWorkerFactory() {
 }
 
 /**
+ * Whether the model files can be reached.
+ *
+ * The model is distributed separately from the app (~45 MB release asset), so a
+ * checkout that never ran `npm run models:download` has the feature but not the
+ * files. The worker asks this question when a load fails, so the UI can say
+ * "install the model" instead of a generic "transcription failed".
+ *
+ * A GET is deliberate: the service worker only stores GET responses, so this
+ * also answers "yes" offline once the model has been downloaded.
+ *
+ * @param {string} modelUrl model folder URL, with a trailing slash
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<boolean>}
+ */
+export async function isModelAvailable(modelUrl, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(new URL('config.json', modelUrl).href, {
+      cache: 'no-store',
+    });
+    return Boolean(response?.ok);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Main-thread client for the transcription worker.
  *
  * Only one transcription runs at a time: the model holds a single ONNX session

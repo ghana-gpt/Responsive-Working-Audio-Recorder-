@@ -15,13 +15,15 @@ This page tracks the repository's version checkpoints. Branch links are source s
 - **Same contract, one honest gap** — progress is real while samples are copied into the WASM heap, then reported as `null` (unknown) for the single encode call, then `1`, exactly like decode. Cancelling terminates the worker, because that is the only way to stop a blocking WASM call: the export ends at once with `ConversionCancelledError` and nothing is stored.
 - **Reproducible, verifiable build** — `npm run build:wasm` builds the bridge with `cargo` for `wasm32-unknown-unknown` and records the artifact and source digests in `vendor/audiobox/build-info.json`. `npm run check:wasm` (part of `npm run validate`, CI and the Pages deploy) fails when the committed `.wasm` no longer matches its sources, and needs no Rust toolchain.
 - **Attribution** — the footer's encoder link and the English/French licence strings point at audiobox's MIT licence, which ships with the crate sources.
-- **Verification** — `npm run verify` is green: `validate` (markup, manifest, service worker, i18n and `check:wasm`), 201 unit tests — 18 of them for MP3 (frame-by-frame parsing of the encoder's output, a cross-check with `ffprobe`/`ffmpeg` when installed, and a digest check against `build-info.json`) — 21/21 recorder e2e steps and 13/13 transcript steps in Chromium. The recorder suite is unchanged: it still saves an MP3 capture, plays the stored bytes and cancels one without storing anything.
+- **Model out of git** — the ~45 MB quantized Whisper model is no longer committed. `model-package.json` pins a GitHub Release asset (`models-whisper-tiny-v1`): its URL, archive SHA-256 and byte size, plus the size and hash of every extracted file. `npm run models:download` verifies the archive and then every file before installing, `npm run models:verify` re-checks an install and `npm run models:package` rebuilds the archive deterministically (the local rebuild reproduces the published SHA-256). A clone without the model still runs: transcription reports that the model is not available instead of failing obscurely, and the Pages workflow restores the model from the Actions cache or downloads and verifies it before deploying. The model lives in its own service-worker cache (`audio-recorder-model-whisper-tiny-v1`), so shell updates never re-download it.
+- **Verification** — `npm run verify` is green: `validate` (markup, manifest, service worker, i18n and `check:wasm`), 213 unit tests — 18 of them for MP3 (frame-by-frame parsing of the encoder's output, a cross-check with `ffprobe`/`ffmpeg` when installed, and a digest check against `build-info.json`), 9 for the model tooling (tar/gzip round-trip, path-traversal refusal, checksum rejection, idempotent install) and 3 for the new model-missing and cache-split behaviour — 21/21 recorder e2e steps and 13/13 transcript steps in Chromium. The recorder suite is unchanged: it still saves an MP3 capture, plays the stored bytes and cancels one without storing anything.
 
 ### Known limitations
 
 1. The encode call is opaque: progress cannot move inside it, so the bar is indeterminate for that stage (decode already was).
 2. The `ffprobe`/`ffmpeg` checks skip themselves when those binaries are missing, so a machine without FFmpeg validates the structure of the output but not its decoded duration.
 3. Rebuilding the binary needs Rust with the `wasm32-unknown-unknown` target; without it, `npm run check:wasm` only verifies that the committed binary and the sources still match.
+4. The `models-whisper-tiny-v1` GitHub Release and its archive still need to be published (a maintainer step; see `README.md`). Until then `npm run models:download` stops with “the release asset is missing”, and the Pages workflow stops there too instead of deploying a site whose transcription would 404. The old model blobs also remain in earlier commits, so clones only shrink once the history is rewritten.
 
 ## v1.3.0 — previous release line (release pending)
 
@@ -105,7 +107,7 @@ Details:
 - The encoder licence was reviewed before adopting it, and again when it was replaced (v1.3 checked lamejs 1.2.1, LGPL-3.0; v1.4.2 replaced it with audiobox 0.5.1, MIT). The current binary is built from the vendored sources (`encoder/`, `vendor/audiobox-0.5.1/`) and documented in `vendor/audiobox/NOTICE.md`. Repeat that review before adding another dependency.
 - Keep `mime.js` pure: extend `resolveFormat()`/`formatAvailability()` with encoder capability instead of branching in the views.
 - Every new string needs English **and** French entries; the i18n parity test enforces this.
-- Bump `VERSION` in `service-worker.js` whenever precached files change.
+- Bump `VERSION` in `service-worker.js` whenever precached files change. The Whisper model is the exception: it is not committed and lives in its own cache, so bump `MODEL_CACHE` (and `version` in `model-package.json`) only when the model bytes change — otherwise every app update would re-download ~45 MB.
 
 ### Exit criteria
 

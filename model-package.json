@@ -1,0 +1,67 @@
+{
+  "$comment": "Describes the published Whisper model asset. `npm run models:download` verifies the archive against sha256, then every extracted file against files[]. Regenerate with `npm run models:package` after changing models/whisper-tiny.",
+  "name": "whisper-tiny",
+  "version": "v1",
+  "release": "models-whisper-tiny-v1",
+  "archive": "whisper-tiny-v1-q8.tar.gz",
+  "url": "https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases/download/models-whisper-tiny-v1/whisper-tiny-v1-q8.tar.gz",
+  "sha256": "acd43e31b5841af5bd016616c3f3766fe85bb3f662473e20534602bbd0b90aac",
+  "bytes": 27901937,
+  "modelBytes": 45209522,
+  "source": "https://huggingface.co/Xenova/whisper-tiny",
+  "license": "MIT",
+  "files": {
+    "LICENSE": {
+      "bytes": 1063,
+      "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d"
+    },
+    "added_tokens.json": {
+      "bytes": 2082,
+      "sha256": "ce949fe720c14311cb6c446e69cfe340dc669d7b006077a6feed6ae571dd7e88"
+    },
+    "config.json": {
+      "bytes": 2248,
+      "sha256": "2b2e4e519084e0ea028b19b153f95202735a971870d6844aa26e559edd292e94"
+    },
+    "generation_config.json": {
+      "bytes": 3716,
+      "sha256": "68ac791fcb4999461a313472125042934656240ba1cba7d1c2627fcbb19ac24c"
+    },
+    "merges.txt": {
+      "bytes": 493869,
+      "sha256": "2df2990a395e35e8dfbc7511e08c12d56018d8d04691e0133e5d63b21e154dc6"
+    },
+    "normalizer.json": {
+      "bytes": 52666,
+      "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+    },
+    "onnx/decoder_model_merged_quantized.onnx": {
+      "bytes": 30727765,
+      "sha256": "6c0c125986b007d2e3734bec84c18bda0152071b90b87fadac6d7764499927a0"
+    },
+    "onnx/encoder_model_quantized.onnx": {
+      "bytes": 10124910,
+      "sha256": "fd9d995b9dcb0520f0dbf6cf68651af639fc385f594d9d876e69ca2802dc438e"
+    },
+    "preprocessor_config.json": {
+      "bytes": 339,
+      "sha256": "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d"
+    },
+    "special_tokens_map.json": {
+      "bytes": 2194,
+      "sha256": "e67ae3a0aaa99abcd9f187138e12db1f65c16a14761c50ef10eef2c174a7a691"
+    },
+    "tokenizer.json": {
+      "bytes": 2480466,
+      "sha256": "27fc476bfe7f17299480be2273fc0608e4d5a99aba2ab5dec5374b4482d1a566"
+    },
+    "tokenizer_config.json": {
+      "bytes": 282683,
+      "sha256": "2a4c4281cf9f51ac6ccc406fdc711a087afe6530f671fa7b80953edc498275ce"
+    },
+    "vocab.json": {
+      "bytes": 1036584,
+      "sha256": "50d6a919f0a0601d56a04eb583c780d18553aa388254ba3158eb6a00f13e2c1a"
+    }
+  }
+}

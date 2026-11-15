@@ -41,6 +41,15 @@ suite prints a skip message (exit 0) when no browser is found unless `E2E_STRICT
   `handleLibraryIntent`/`handleSettingsChange` inside `scripts/main.js`.
 - **Precached asset** → add it to `SHELL_ASSETS` in `service-worker.js` and bump `VERSION`.
 - **New icon** → draw it in `tools/generate-icons.mjs`, then run `npm run icons`.
+- **Speech model** → the ~45 MB of ONNX graphs are not committed. Change
+  `models/whisper-tiny/` locally, run `npm run models:package`, upload the archive to the
+  release named in `model-package.json`, then update its `version`, `release`, `archive`,
+  `url`, `sha256`, `bytes`, `modelBytes` and `files` entries. Reinstall from the archive
+  (`npm run models:download -- --force`), run `npm run models:verify`, then commit the
+  manifest. Publish the release first: draft assets answer 404, so the download (and the
+  Pages deploy) fails until the archive is public. Bump `MODEL_CACHE` in
+  `service-worker.js` only when the model bytes change, so app updates never re-download
+  the 45 MB.
 
 ## Commit style
 

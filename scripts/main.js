@@ -1082,6 +1082,11 @@ function reportAsrError(error) {
     toaster.show({ message: t('errors.emptyAudio'), tone: 'error' });
     return;
   }
+  if (code === 'modelMissing') {
+    console.warn('[asr] speech model files are unavailable', error);
+    toaster.show({ message: t('errors.asrModelMissing'), tone: 'error' });
+    return;
+  }
   console.warn('[asr] transcription failed', error);
   toaster.show({
     message: t('errors.asrFailed', { message: error?.message ?? code }),

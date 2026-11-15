@@ -21,3 +21,15 @@ Thumbs.db
 # Rust build output for the WebAssembly MP3 encoder (`npm run build:wasm`).
 # The built binary itself is committed under vendor/audiobox/.
 encoder/target/
+
+# Whisper model (~45 MB): it lives in a versioned GitHub Release asset and is
+# fetched by `npm run models:download`, which verifies every byte against
+# model-package.json. Committing it again would bloat every clone and push.
+# The LICENSE stays tracked so the attribution travels with the checkout.
+/models/whisper-tiny/*
+!/models/whisper-tiny/LICENSE
+/models/.download/
+/models/whisper-tiny.previous-*/
+
+# Release archive produced by `npm run models:package`.
+/dist/

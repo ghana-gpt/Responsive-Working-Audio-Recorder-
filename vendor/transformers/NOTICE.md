@@ -16,4 +16,7 @@ cannot send the COOP/COEP headers threaded WebAssembly needs, so
 
 `transformers.min.js` is loaded from `scripts/modules/asr-worker.js` only, inside
 a dedicated worker, with `env.allowRemoteModels = false`; every model file comes
-from `models/whisper-tiny/` on this origin.
+from `models/whisper-tiny/` on this origin. Those ~45 MB of ONNX graphs are not
+committed to git: they are installed from the checksum-pinned release asset
+described by `model-package.json` (`npm run models:download`), so the runtime here
+and the model there are versioned and reviewed separately.

@@ -182,8 +182,9 @@ export const messages = {
     'settings.liveTranscribe': 'Show live captions while recording',
     'settings.asrLanguage': 'Spoken language',
     'settings.speechHint':
-      'Transcription runs on this device with Whisper. Nothing is uploaded and the model is already included, so it works offline.',
-    'settings.asrModelHint': 'Model: {model} · {size} stored on this device',
+      'Transcription runs on this device with Whisper. Nothing is uploaded, and the model is downloaded once then cached, so it keeps working offline.',
+    'settings.asrModelHint':
+      'Model: {model} · {size} downloaded once, then served from this device’s cache',
     'settings.asrUnsupported':
       'This browser cannot run the speech model (WebAssembly or module workers are unavailable).',
 
@@ -257,6 +258,8 @@ export const messages = {
     'errors.conversionBusy':
       'Another conversion is already running. Wait for it to finish, then try again.',
     'errors.asrFailed': 'Transcription failed: {message}',
+    'errors.asrModelMissing':
+      'The speech model is not available. Check your connection and try again. If you run the app from a source checkout, install it once with “npm run models:download”.',
     'errors.asrUnsupported': 'This browser cannot run the speech model.',
     'errors.asrBusy': 'A transcription is already running. Wait for it to finish.',
     'errors.emptyAudio': 'There is no audio to transcribe.',
@@ -489,8 +492,9 @@ export const messages = {
     'settings.liveTranscribe': 'Afficher les sous-titres en direct pendant l’enregistrement',
     'settings.asrLanguage': 'Langue parlée',
     'settings.speechHint':
-      'La transcription s’exécute sur cet appareil avec Whisper. Rien n’est envoyé et le modèle est déjà inclus : elle fonctionne hors ligne.',
-    'settings.asrModelHint': 'Modèle : {model} · {size} enregistrés sur cet appareil',
+      'La transcription s’exécute sur cet appareil avec Whisper. Rien n’est envoyé ; le modèle est téléchargé une fois puis mis en cache, ce qui permet de travailler hors ligne.',
+    'settings.asrModelHint':
+      'Modèle : {model} · {size} téléchargés une fois, puis servis depuis le cache de cet appareil',
     'settings.asrUnsupported':
       'Ce navigateur ne peut pas exécuter le modèle vocal (WebAssembly ou les workers de module sont indisponibles).',
 
@@ -572,6 +576,8 @@ export const messages = {
     'errors.conversionBusy':
       'Une autre conversion est déjà en cours. Attendez qu’elle se termine, puis réessayez.',
     'errors.asrFailed': 'La transcription a échoué : {message}',
+    'errors.asrModelMissing':
+      'Le modèle vocal est indisponible. Vérifiez votre connexion et réessayez. Si vous exécutez l’application depuis les sources, installez-le une fois avec « npm run models:download ».',
     'errors.asrUnsupported': 'Ce navigateur ne peut pas exécuter le modèle vocal.',
     'errors.asrBusy': 'Une transcription est déjà en cours. Attendez qu’elle se termine.',
     'errors.emptyAudio': 'Il n’y a aucun audio à transcrire.',

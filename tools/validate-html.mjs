@@ -202,13 +202,29 @@ function checkServiceWorker() {
   const source = read('service-worker.js');
   if (!source) return;
 
-  const listed = [...source.matchAll(/'\.\/([^']*)'/g)]
-    .map((match) => match[1])
+  const listed = [...source.matchAll(/'(?:\.\/([^']*)|(models\/[^']*))'/g)]
+    .map((match) => match[1] ?? match[2])
     .filter((path) => path && /\.[a-z0-9]+$/i.test(path));
 
-  const missing = [...new Set(listed)].filter((path) => !existsSync(join(ROOT, path)));
-  if (missing.length > 0) fail(`service worker precaches missing file(s): ${missing.join(', ')}`);
-  else ok(`${new Set(listed).size} precached assets exist`);
+  const unique = [...new Set(listed)];
+  const missing = unique.filter((path) => !existsSync(join(ROOT, path)));
+  // The model is downloaded, not committed (see model-package.json), so a clone
+  // without `npm run models:download` may legitimately miss it. It is still
+  // precached: a deployed site always ships the verified copy.
+  const missingModel = missing.filter((path) => path.startsWith('models/'));
+  const missingApp = missing.filter((path) => !path.startsWith('models/'));
+
+  if (missingApp.length > 0) {
+    fail(`service worker precaches missing file(s): ${missingApp.join(', ')}`);
+  } else {
+    ok(`${unique.length - missingModel.length} precached assets exist`);
+  }
+  if (missingModel.length > 0) {
+    warn(
+      `speech model not installed (${missingModel.join(', ')}): ` +
+        'run `npm run models:download` to include it in the deployed site',
+    );
+  }
 
   // Every module on disk must be precached so an offline boot never misses one.
   const moduleDir = join(ROOT, 'scripts/modules');

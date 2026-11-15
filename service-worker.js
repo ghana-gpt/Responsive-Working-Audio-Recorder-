@@ -7,17 +7,29 @@
  *    deploy is picked up immediately but the app still opens with no network;
  *  - everything else same-origin is cache-first with a background refresh.
  *
- * The Whisper model (~40 MB of quantized ONNX graphs) is deliberately *not*
+ * The Whisper model (~45 MB of quantized ONNX graphs) is deliberately *not*
  * precached: it is cached by the same cache-first rule the first time you
  * transcribe, so you pay for it only if you use the feature and transcription
  * then keeps working offline. The runtime that loads it (transformers.js and the
- * ONNX Runtime WASM binary, ~4.6 MB) is app code, so it *is* precached.
+ * ONNX Runtime WASM binary, ~11 MB) is app code, so it *is* precached.
+ *
+ * Model files get their own cache (`MODEL_CACHE`). The model is distributed as a
+ * separate release asset (see `model-package.json`), so it changes on a different
+ * schedule than the app shell: deleting it with the old shell cache would make
+ * every app update re-download ~45 MB. Routine shell updates therefore keep it.
+ * To replace the model, bump `MODEL_CACHE` to match the manifest's `version`
+ * (for example `...-whisper-tiny-v2`): the old cache is then purged on activate
+ * and the new files are fetched once on first use.
  *
  * Recordings never touch the cache: they live in IndexedDB and blob: URLs.
  */
 
 const VERSION = '1.4.2';
 const CACHE_NAME = `audio-recorder-shell-${VERSION}`;
+const MODEL_CACHE = 'audio-recorder-model-whisper-tiny-v1';
+
+/** Path prefix of the model files, matched against the request pathname. */
+const MODEL_PATH = '/models/whisper-tiny/';
 
 /** Files that make up the installable app shell (all relative to the scope). */
 const SHELL_ASSETS = [
@@ -93,9 +105,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      await Promise.all(
-        names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)),
-      );
+      // The model cache outlives shell versions on purpose: it is only replaced
+      // when `MODEL_CACHE` itself changes (a new model release).
+      const keep = new Set([CACHE_NAME, MODEL_CACHE]);
+      await Promise.all(names.filter((name) => !keep.has(name)).map((name) => caches.delete(name)));
       await self.clients.claim();
     })(),
   );
@@ -138,9 +151,10 @@ async function handleNavigation(event) {
  * received the bytes.
  *
  * @param {FetchEvent} event
+ * @param {string} [cacheName] cache to read and write (`CACHE_NAME` by default)
  */
-async function handleAsset(event) {
-  const cache = await caches.open(CACHE_NAME);
+async function handleAsset(event, cacheName = CACHE_NAME) {
+  const cache = await caches.open(cacheName);
   const cached = await cache.match(event.request, { ignoreSearch: true });
   if (cached) {
     event.waitUntil(
@@ -185,7 +199,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(handleAsset(event).catch(() => Response.error()));
+  // Model files live in a cache that survives app updates; see MODEL_CACHE.
+  const cacheName = url.pathname.includes(MODEL_PATH) ? MODEL_CACHE : CACHE_NAME;
+  event.respondWith(handleAsset(event, cacheName).catch(() => Response.error()));
 });
 
 /** Let the page trigger an immediate update when it shows the toast. */

@@ -17,12 +17,18 @@ import {
   formatTimestamp,
   formatTranscriptText,
   isAsrSupported,
+  isModelAvailable,
   mergeWindows,
   normalizeSegments,
   planWindows,
   resampleLinear,
   windowRms,
 } from '../../scripts/modules/asr.js';
+
+/** Downloaded model folder, relative to this test file. */
+const MODEL_DIR = '../../models/whisper-tiny';
+/** The encoder graph is the largest file and only exists in a complete install. */
+const ENCODER_FILE = 'onnx/encoder_model_quantized.onnx';
 
 /** Minimal stand-in for a module worker: records posts, lets a test answer. */
 function fakeWorker() {
@@ -332,11 +338,33 @@ test('createTranscriber surfaces worker errors and dispose()', async () => {
   assert.equal(worker.terminated, true);
 });
 
+test('isModelAvailable probes config.json and never throws', async () => {
+  const seen = [];
+  const target = 'https://app.test/models/whisper-tiny/';
+
+  const present = await isModelAvailable(target, async (url) => {
+    seen.push(url);
+    return new Response('{"model_type":"whisper"}', { status: 200 });
+  });
+  assert.equal(present, true);
+  assert.deepEqual(seen, [`${target}config.json`]);
+
+  const absent = await isModelAvailable(target, async () => new Response('', { status: 404 }));
+  assert.equal(absent, false);
+
+  const offline = await isModelAvailable(target, async () => {
+    throw new TypeError('Failed to fetch');
+  });
+  assert.equal(offline, false, 'a network failure means "not available", not a crash');
+});
+
 test(
-  'ASR_MODEL_BYTES matches the vendored model files',
-  { skip: !existsSync(join(dirname(fileURLToPath(import.meta.url)), '../../models/whisper-tiny')) },
+  'ASR_MODEL_BYTES matches the installed model files',
+  // The model is not committed: a fresh clone only has LICENSE until
+  // `npm run models:download` runs, so key the skip off an actual graph file.
+  { skip: !existsSync(join(dirname(fileURLToPath(import.meta.url)), MODEL_DIR, ENCODER_FILE)) },
   () => {
-    const root = join(dirname(fileURLToPath(import.meta.url)), '../../models/whisper-tiny');
+    const root = join(dirname(fileURLToPath(import.meta.url)), MODEL_DIR);
     const files = readdirSync(root, { withFileTypes: true, recursive: true }).filter(
       // The licence is documentation, not part of what the worker downloads.
       (entry) => entry.isFile() && entry.name !== 'LICENSE',

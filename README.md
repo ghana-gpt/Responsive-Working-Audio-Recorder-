@@ -28,7 +28,7 @@ promise while fixing the engineering:
 | Recording duration includes pauses               | Elapsed time excludes paused intervals                                                   |
 | One download at a time                           | Bulk selection, ZIP export and restore, Web Share API                                    |
 | English-only, light-only                         | Two locales (EN/FR), system/light/dark themes, no FOUC                                   |
-| Untested                                         | 201 unit tests, HTML/service-worker validation, 21 recorder + 13 transcript e2e steps    |
+| Untested                                         | 213 unit tests, HTML/service-worker validation, 21 recorder + 13 transcript e2e steps    |
 
 ## Features
 
@@ -63,11 +63,13 @@ promise while fixing the engineering:
 - **Transcription** — on-device speech-to-text with a vendored
   [transformers.js](https://github.com/huggingface/transformers.js) runtime
   (Apache-2.0, see [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md))
-  and a quantized Whisper tiny model checked into `models/whisper-tiny`. A dedicated
-  module worker downloads the model once, resamples the stored audio to 16 kHz mono,
-  decodes it in 30 s windows and reports real progress; only then is the transcript
-  written next to the recording. Transcripts are editable, searchable and exportable
-  (plain text or SubRip), and a failure never touches the audio.
+  and a quantized Whisper tiny model installed into `models/whisper-tiny` from a
+  checksum-pinned release asset (see [`model-package.json`](model-package.json) and
+  [The speech model](#the-speech-model)). A dedicated module worker fetches the model
+  once, resamples the stored audio to 16 kHz mono, decodes it in 30 s windows and
+  reports real progress; only then is the transcript written next to the recording.
+  Transcripts are editable, searchable and exportable (plain text or SubRip), and a
+  failure never touches the audio.
 - **Live captions** — an opt-in toggle previews the transcript while you record. The
   preview decodes in 4–15 s slices, keeps at most one decode queued, stops capturing
   samples the moment the microphone stops and never writes a preview to the library:
@@ -117,10 +119,53 @@ iOS rows describe the APIs the app targets — validate them manually before a r
 Unsupported formats are disabled in the settings panel with an explanation instead of
 silently failing, and every error is mapped to a human sentence (`errors.*` keys).
 
-Transcription needs `Worker` (module type), WebAssembly and the same-origin model files;
-when any of those are missing the feature hides itself and the rest of the app keeps
-working. The first transcription downloads about 45 MB (runtime + model) from this
-origin; it is cached afterwards, so it then works offline.
+Transcription needs `Worker` (module type) and WebAssembly; when either is missing the
+feature hides itself and the rest of the app keeps working. The runtime (~11 MB) ships with
+the app and is precached; the model (~45 MB) is fetched from this origin the first time you
+transcribe and cached afterwards, so it then works offline. A fresh clone has no
+`models/whisper-tiny/` yet — run `npm run models:download` once, or transcription fails with
+“the speech model is not available” and the rest of the app is unaffected.
+
+### The speech model
+
+`models/whisper-tiny/` holds ~45 MB of quantized ONNX graphs and tokenizer data, so it is
+**not** committed (see `.gitignore`). The exact bytes are pinned in
+[`model-package.json`](model-package.json): the release tag, the archive name, its SHA-256
+and byte size, and the size plus SHA-256 of every extracted file.
+
+```bash
+npm run models:download   # fetch → verify the archive → verify every file → install
+npm run models:verify     # check an existing install against the manifest
+npm run models:package    # rebuild dist/<archive> after changing models/whisper-tiny
+```
+
+- The archive is a plain `ustar` + gzip tarball published as a GitHub Release asset
+  (`models-whisper-tiny-v1`). Nothing is written into `models/whisper-tiny/` until both
+  the archive checksum and every extracted file match, so a truncated or tampered
+  download can never be mistaken for an install.
+- `models:download` is idempotent: when the installed files already match it logs that
+  nothing is to do. Pass `-- --force` to reinstall from scratch.
+- `models:package` writes `dist/whisper-tiny-v1-q8.tar.gz` and prints its SHA-256; upload
+  that file to the release, then update `sha256`, `bytes`, `modelBytes` and `files` in the
+  manifest. Bump `version`/`release`/`archive`/`url` together for a new model, and bump
+  `MODEL_CACHE` in `service-worker.js` to match so browsers replace the cached copy.
+- The app itself never downloads from GitHub: the model is served from this origin, and
+  the service worker keeps it in a separate cache (`audio-recorder-model-whisper-tiny-v1`)
+  that survives app-shell updates.
+
+To publish (or replace) the asset:
+
+1. `npm run models:package` writes `dist/whisper-tiny-v1-q8.tar.gz` and prints its SHA-256.
+2. Create the release named in `model-package.json` (`models-whisper-tiny-v1`) and upload
+   that file. A **draft** release does not serve its assets, and an unpublished asset
+   answers 404, so publish it before pushing a commit that relies on it.
+3. Commit the manifest together with the `sha256`, `bytes` and per-file values the command
+   printed. Until the release exists, `models:download` stops with “the release asset is
+   missing” and the Pages workflow fails instead of publishing a site whose transcription
+   would 404.
+
+The blobs still exist in older commits, so a full clone is as large as before until the
+history is rewritten (`git filter-repo`); new commits no longer carry them.
 
 ## Keyboard shortcuts
 
@@ -141,13 +186,14 @@ button/link has focus, so they never steal a keystroke from an active control.
 .
 ├── index.html                  # Semantic shell: recorder, library, settings, dialogs
 ├── manifest.webmanifest        # PWA metadata (installable)
-├── service-worker.js           # Offline shell cache (network-first navigations)
+├── model-package.json          # Pinned release asset + per-file hashes for the model
+├── service-worker.js           # Offline shell cache + long-lived model cache
 ├── icons/                      # Generated SVG + PNG icons (192/512/maskable)
 ├── vendor/audiobox/            # Committed MP3 encoder .wasm + digests (MIT, see NOTICE.md)
 ├── vendor/audiobox-0.5.1/      # audiobox crate sources the .wasm is built from (MIT)
 ├── encoder/                    # Rust bridge crate exposing audiobox through a tiny ABI
 ├── vendor/transformers/        # Vendored ASR runtime (Apache-2.0, see NOTICE.md)
-├── models/whisper-tiny/        # Quantized Whisper tiny ONNX model + tokenizer
+├── models/whisper-tiny/        # Whisper tiny ONNX + tokenizer (downloaded, not committed)
 ├── styles/main.css             # Design tokens, layout, components, themes
 ├── scripts/
 │   ├── main.js                 # Orchestrator: state, data, wiring, shortcuts, boot
@@ -183,6 +229,7 @@ button/link has focus, so they never steal a keystroke from an active control.
 ├── tools/
 │   ├── dev-server.mjs          # Zero-dependency static server (also used by e2e)
 │   ├── build-mp3-wasm.mjs      # Builds the encoder .wasm, records/verifies its digests
+│   ├── models.mjs              # Pack, verify and install the pinned speech model
 │   ├── validate-html.mjs       # Markup, manifest, SW and i18n validator
 │   └── generate-icons.mjs      # Draws the PNG icons with no dependencies
 └── tests/
@@ -201,19 +248,22 @@ test can assert real behaviour while the unit tests run in milliseconds.
 
 ## Scripts
 
-| Command                 | What it does                                      |
-| ----------------------- | ------------------------------------------------- |
-| `npm start`             | Serve the app at <http://127.0.0.1:4173>          |
-| `npm test`              | Unit tests (`node:test`, no framework)            |
-| `npm run test:e2e`      | Real Chromium flow with a fake microphone         |
-| `npm run test:e2e:asr`  | Same browser, stubbed Whisper worker, transcript  |
-| `npm run lint`          | ESLint (flat config, browser + Node globals)      |
-| `npm run format`        | Prettier write                                    |
-| `npm run validate:html` | Markup, manifest, service-worker and i18n checks  |
-| `npm run build:wasm`    | Rebuild the MP3 encoder with `cargo` (needs Rust) |
-| `npm run check:wasm`    | Verify the committed `.wasm` matches its sources  |
-| `npm run icons`         | Regenerate the PNG icons                          |
-| `npm run verify`        | `validate` + unit tests + e2e — what CI runs      |
+| Command                   | What it does                                      |
+| ------------------------- | ------------------------------------------------- |
+| `npm start`               | Serve the app at <http://127.0.0.1:4173>          |
+| `npm test`                | Unit tests (`node:test`, no framework)            |
+| `npm run test:e2e`        | Real Chromium flow with a fake microphone         |
+| `npm run test:e2e:asr`    | Same browser, stubbed Whisper worker, transcript  |
+| `npm run lint`            | ESLint (flat config, browser + Node globals)      |
+| `npm run format`          | Prettier write                                    |
+| `npm run validate:html`   | Markup, manifest, service-worker and i18n checks  |
+| `npm run build:wasm`      | Rebuild the MP3 encoder with `cargo` (needs Rust) |
+| `npm run check:wasm`      | Verify the committed `.wasm` matches its sources  |
+| `npm run models:download` | Fetch and verify the speech model (see above)     |
+| `npm run models:verify`   | Check the installed model against its manifest    |
+| `npm run models:package`  | Rebuild the model release archive                 |
+| `npm run icons`           | Regenerate the PNG icons                          |
+| `npm run verify`          | `validate` + unit tests + e2e — what CI runs      |
 
 ## Testing
 
@@ -233,11 +283,13 @@ npm run verify
   types, `no-store`, app-shell fallback, 404s and path containment), transcription
   (downmix/resample maths, window planning, worker orchestration with an injected
   worker, progress normalisation, transcript caps, SubRip formatting and the size
-  quoted for the vendored model) and the live-caption cadence (4–15 s slices, one
-  queued decode, no previews after `stop()`), plus the service worker (cache-first
-  assets with a background refresh, shell fallback on an offline navigation, and cache
-  writes that never delay the response — that last one stalled multi-megabyte ONNX
-  downloads when it was awaited).
+  quoted for the installed model), the live-caption cadence (4–15 s slices, one queued
+  decode, no previews after `stop()`), the model package tool (manifest validation,
+  ustar round-trips, archive and per-file SHA-256 checks, refusing a tampered archive,
+  idempotent installs and `--force`) and the service worker (cache-first assets with a
+  background refresh, shell fallback on an offline navigation, a model cache that
+  survives shell updates, and cache writes that never delay the response — that last one
+  stalled multi-megabyte ONNX downloads when it was awaited).
 - **The e2e suite** boots the real app in Chromium with
   `--use-fake-device-for-media-stream`, then records, pauses, resumes, stops, reloads
   (IndexedDB persistence), renames with tags, plays, downloads, deletes, imports a long
@@ -259,14 +311,22 @@ npm run verify
 The app is static files — any host works (GitHub Pages, Netlify, S3, nginx).
 
 - **GitHub Pages**: `.github/workflows/deploy-pages.yml` publishes `index.html`,
-  `manifest.webmanifest`, `service-worker.js`, `icons/`, `scripts/`, `styles/` and the
-  runtime parts of `vendor/` on every push to `main`. The encoder's crate sources
-  (`vendor/audiobox-0.5.1/`, `encoder/`) are repository-only; the site ships the compiled
-  `mp3-encoder.wasm`.
+  `manifest.webmanifest`, `service-worker.js`, `icons/`, `scripts/`, `styles/`, the
+  runtime parts of `vendor/` and `models/` on every push to `main`. The encoder's crate
+  sources (`vendor/audiobox-0.5.1/`, `encoder/`) are repository-only; the site ships the
+  compiled `mp3-encoder.wasm`. The workflow runs `npm run models:download` before
+  validating and assembling the site (restoring `models/whisper-tiny` from the Actions
+  cache when the manifest has not changed), so the published site always ships a
+  byte-verified model even though the blobs are not in git.
 - **Your own server**: serve the repository root over **https** (or `localhost`).
   Microphone access, service workers and IndexedDB are all gated on a secure context.
+  Run `npm run models:download` once before uploading, or copy a verified
+  `models/whisper-tiny/` directory; without it the app records and edits normally but
+  transcription reports that the model is unavailable.
 - After changing any precached file, bump `VERSION` in `service-worker.js` so browsers
-  pick up the new shell and show the "new version available" toast.
+  pick up the new shell and show the "new version available" toast. Model files are
+  cached separately: bump `MODEL_CACHE` (and `version` in `model-package.json`) only when
+  the model bytes change, so routine app updates never re-download ~45 MB.
 
 ## Privacy
 
@@ -300,10 +360,12 @@ Issues and pull requests are welcome — please read
   [`vendor/audiobox/NOTICE.md`](vendor/audiobox/NOTICE.md) for provenance, the bridge ABI
   and rebuild instructions.
 - Speech-to-text: [transformers.js](https://github.com/huggingface/transformers.js) and
-  [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Apache-2.0) plus the
-  quantized [`whisper-tiny`](https://huggingface.co/openai/whisper-tiny) model, all
-  vendored under `vendor/transformers/` and `models/whisper-tiny/` — see
-  [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md).
+  [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (Apache-2.0) vendored under
+  `vendor/transformers/`, plus the quantized
+  [Whisper tiny](https://huggingface.co/Xenova/whisper-tiny) model (MIT), installed into
+  `models/whisper-tiny/` from the release asset pinned in `model-package.json` — see
+  [`vendor/transformers/NOTICE.md`](vendor/transformers/NOTICE.md) and
+  [`models/whisper-tiny/LICENSE`](models/whisper-tiny/LICENSE).
 
 ## Licence
 

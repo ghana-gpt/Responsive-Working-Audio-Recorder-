@@ -30,6 +30,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Restore the verified speech model
+        uses: actions/cache@v4
+        with:
+          path: models/whisper-tiny
+          key: whisper-tiny-${{ hashFiles('model-package.json') }}
+
+      - name: Install the speech model
+        # Idempotent: with the cache restored it only re-verifies every file
+        # against model-package.json; otherwise it downloads the release asset,
+        # checks the archive SHA-256 and each extracted file before installing.
+        run: npm run models:download
+
       - name: Validate before deploying
         run: npm run validate
 

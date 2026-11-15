@@ -36,13 +36,16 @@ function within(promise, ms = 1000) {
  *   cache?: Map<string, Response>,
  *   network?: (request: object) => Response | Promise<Response>,
  *   onPut?: (key: string, response: Response) => void | Promise<void>,
+ *   cacheNames?: string[],
  * }} [options]
  */
-function loadWorker({ cache = new Map(), network, onPut } = {}) {
+function loadWorker({ cache = new Map(), network, onPut, cacheNames = [] } = {}) {
   const handlers = new Map();
   const pending = [];
   const putCalls = [];
   const fetchCalls = [];
+  const openedCaches = [];
+  const deletedCaches = [];
   /** @type {Promise<Response>|null} */
   let response = null;
 
@@ -65,9 +68,15 @@ function loadWorker({ cache = new Map(), network, onPut } = {}) {
       clients: { claim: () => Promise.resolve() },
     },
     caches: {
-      open: async () => cacheApi,
-      keys: async () => [],
-      delete: async () => true,
+      open: async (name) => {
+        openedCaches.push(name);
+        return cacheApi;
+      },
+      keys: async () => [...cacheNames],
+      delete: async (name) => {
+        deletedCaches.push(name);
+        return true;
+      },
     },
     fetch: (request) => {
       fetchCalls.push(keyOf(request));
@@ -100,7 +109,7 @@ function loadWorker({ cache = new Map(), network, onPut } = {}) {
     return { response };
   }
 
-  return { handlers, cache, putCalls, fetchCalls, pending, dispatch };
+  return { handlers, cache, putCalls, fetchCalls, openedCaches, deletedCaches, pending, dispatch };
 }
 
 test('an asset is returned before its cache write finishes', async () => {
@@ -180,6 +189,34 @@ test('a navigation refreshes the cached shell without blocking', async () => {
   await Promise.all(worker.pending);
   assert.equal(cachedBody, 'network body');
   assert.deepEqual(worker.putCalls, ['./index.html']);
+});
+
+test('model files and the app shell use separate caches', async () => {
+  const worker = loadWorker();
+
+  await (await worker.dispatch({ url: `${ORIGIN}/styles/main.css` }).response).text();
+  await (
+    await worker.dispatch({ url: `${ORIGIN}/models/whisper-tiny/config.json` }).response
+  ).text();
+  await Promise.all(worker.pending);
+
+  const [shellCache, modelCache] = worker.openedCaches;
+  assert.match(shellCache, /^audio-recorder-shell-/);
+  assert.equal(modelCache, 'audio-recorder-model-whisper-tiny-v1');
+  assert.notEqual(shellCache, modelCache, 'a shell update must not purge the model');
+});
+
+test('activating a new shell deletes old shells but keeps the model cache', async () => {
+  const worker = loadWorker({
+    cacheNames: ['audio-recorder-shell-0.0.1', 'audio-recorder-model-whisper-tiny-v1'],
+  });
+
+  worker.handlers.get('activate')({
+    waitUntil: (promise) => worker.pending.push(promise),
+  });
+  await Promise.all(worker.pending);
+
+  assert.deepEqual(worker.deletedCaches, ['audio-recorder-shell-0.0.1']);
 });
 
 test('only same-origin GETs are handled', async () => {

@@ -1,0 +1,7 @@
+# Binary assets are ordinary Git blobs: they are small and the project does not
+# use Git LFS. The Whisper model (~45 MB) is not tracked at all — it lives in a
+# versioned release asset described by model-package.json and is fetched with
+# `npm run models:download`.
+*.wasm binary
+*.onnx binary
+*.zip binary
