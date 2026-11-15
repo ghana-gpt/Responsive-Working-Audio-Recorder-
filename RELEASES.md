@@ -23,7 +23,7 @@ This page tracks the repository's version checkpoints. Branch links are source s
 1. The encode call is opaque: progress cannot move inside it, so the bar is indeterminate for that stage (decode already was).
 2. The `ffprobe`/`ffmpeg` checks skip themselves when those binaries are missing, so a machine without FFmpeg validates the structure of the output but not its decoded duration.
 3. Rebuilding the binary needs Rust with the `wasm32-unknown-unknown` target; without it, `npm run check:wasm` only verifies that the committed binary and the sources still match.
-4. The `models-whisper-tiny-v1` GitHub Release and its archive still need to be published (a maintainer step; see `README.md`). Until then `npm run models:download` stops with “the release asset is missing”, and the Pages workflow stops there too instead of deploying a site whose transcription would 404. The old model blobs also remain in earlier commits, so clones only shrink once the history is rewritten.
+4. The `models-whisper-tiny-v1` Release is published and its asset is verified (27,901,937 bytes, SHA-256 `acd43e31…0aac`), so `npm run models:download` works from a fresh clone and the Pages deploy ships the model from its own cache. `main` carries no ONNX blobs — the commits that had introduced them were rewritten before their first push — so clones stay around 5 MB and no `git filter-repo` pass is needed; only the local backup refs (`backup/pre-model-split-018b981`, `refs/original/refs/heads/main`) still hold the old blobs.
 
 ## v1.3.0 — previous release line (release pending)
 

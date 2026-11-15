@@ -164,8 +164,16 @@ To publish (or replace) the asset:
    missing” and the Pages workflow fails instead of publishing a site whose transcription
    would 404.
 
-The blobs still exist in older commits, so a full clone is as large as before until the
-history is rewritten (`git filter-repo`); new commits no longer carry them.
+The published asset is
+[`models-whisper-tiny-v1`](https://github.com/ghana-gpt/Responsive-Working-Audio-Recorder-/releases/tag/models-whisper-tiny-v1)
+(27.9 MB, SHA-256 `acd43e31b5841af5bd016616c3f3766fe85bb3f662473e20534602bbd0b90aac`).
+
+`main` carries no ONNX blobs: the commits that introduced the model were rewritten before
+their first push, so a clone is ~5 MB and `git filter-repo` is not needed. The old blobs
+survive only in local backup refs (`backup/pre-model-split-018b981` and
+`refs/original/refs/heads/main`); while you still want that safety net, keep them, otherwise
+`git update-ref -d refs/original/refs/heads/main`, `git branch -D backup/pre-model-split-018b981`
+and `git gc --prune=now` reclaim the space.
 
 ## Keyboard shortcuts
 
