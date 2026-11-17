@@ -325,7 +325,11 @@ The app is static files — any host works (GitHub Pages, Netlify, S3, nginx).
   compiled `mp3-encoder.wasm`. The workflow runs `npm run models:download` before
   validating and assembling the site (restoring `models/whisper-tiny` from the Actions
   cache when the manifest has not changed), so the published site always ships a
-  byte-verified model even though the blobs are not in git.
+  byte-verified model even though the blobs are not in git. The repository's Pages source
+  must stay **GitHub Actions** (`build_type: workflow`, the default for this workflow):
+  the legacy “deploy from a branch” source publishes the tracked files only, and since
+  `models/whisper-tiny/` is gitignored it would serve a site whose transcription 404s the
+  moment it finishes after an Actions deploy.
 - **Your own server**: serve the repository root over **https** (or `localhost`).
   Microphone access, service workers and IndexedDB are all gated on a secure context.
   Run `npm run models:download` once before uploading, or copy a verified

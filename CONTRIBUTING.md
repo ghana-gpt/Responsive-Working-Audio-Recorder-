@@ -47,7 +47,9 @@ suite prints a skip message (exit 0) when no browser is found unless `E2E_STRICT
   `url`, `sha256`, `bytes`, `modelBytes` and `files` entries. Reinstall from the archive
   (`npm run models:download -- --force`), run `npm run models:verify`, then commit the
   manifest. Publish the release first: draft assets answer 404, so the download (and the
-  Pages deploy) fails until the archive is public. Bump `MODEL_CACHE` in
+  Pages deploy) fails until the archive is public. Keep the Pages source on **GitHub
+  Actions** (`build_type: workflow`): a “deploy from a branch” source publishes only the
+  tracked files, and the model is not one of them. Bump `MODEL_CACHE` in
   `service-worker.js` only when the model bytes change, so app updates never re-download
   the 45 MB.
 
