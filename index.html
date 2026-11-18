@@ -312,10 +312,40 @@
               <select id="asr-language"></select>
             </div>
             <p class="hint" data-i18n="settings.speechHint">
-              Whisper runs on this device. Nothing is uploaded, and the model is downloaded once
-              then cached, so transcription keeps working offline.
+              Transcription runs on this device with Whisper. Nothing is uploaded. The speech model
+              stays on this device so it keeps working offline; download it once below to use it
+              without a connection.
             </p>
-            <p id="asr-model-hint" class="hint"></p>
+            <!-- The model is ~45 MB and lives on the device, so the download is
+                 explicit: a status line, byte progress, cancel and a retry. -->
+            <div id="asr-model" class="model" data-state="unknown">
+              <p id="asr-model-hint" class="hint"></p>
+              <p id="asr-model-status" class="model__status" role="status"></p>
+              <progress id="asr-model-progress" class="model__bar" max="100" value="0" hidden>
+                0%
+              </progress>
+              <div class="model__actions">
+                <button id="asr-model-download" class="btn btn--ghost btn--sm" type="button">
+                  <span class="btn__icon" aria-hidden="true">⤓</span>
+                  <span class="btn__text" data-i18n="settings.asrModelDownload">
+                    Download for offline use
+                  </span>
+                </button>
+                <button id="asr-model-cancel" class="btn btn--ghost btn--sm" type="button" hidden>
+                  <span class="btn__text" data-i18n="settings.asrModelCancel">Cancel download</span>
+                </button>
+                <button
+                  id="asr-model-remove"
+                  class="btn btn--ghost btn--sm btn--danger"
+                  type="button"
+                  hidden
+                >
+                  <span class="btn__text" data-i18n="settings.asrModelRemove"
+                    >Remove from device</span
+                  >
+                </button>
+              </div>
+            </div>
           </fieldset>
 
           <fieldset class="settings__group">

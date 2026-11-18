@@ -23,6 +23,9 @@ import { BITRATES } from './settings.js';
  *   asrModelBytes?: number,
  *   onChange: (patch: object) => void,
  *   onReset: () => void,
+ *   onModelDownload?: () => void,
+ *   onModelCancel?: () => void,
+ *   onModelRemove?: () => void,
  * }} options
  */
 export function createSettingsView({
@@ -35,6 +38,9 @@ export function createSettingsView({
   asrModelBytes = 0,
   onChange,
   onReset,
+  onModelDownload = () => {},
+  onModelCancel = () => {},
+  onModelRemove = () => {},
 }) {
   const formatContainer = $('#format-options', root);
   const qualitySelect = $('#quality-select', root);
@@ -45,6 +51,12 @@ export function createSettingsView({
   const liveBox = $('#live-transcribe', root);
   const asrLanguageSelect = $('#asr-language', root);
   const asrModelHint = $('#asr-model-hint', root);
+  const modelBox = $('#asr-model', root);
+  const modelStatus = $('#asr-model-status', root);
+  const modelProgress = $('#asr-model-progress', root);
+  const modelDownload = $('#asr-model-download', root);
+  const modelCancel = $('#asr-model-cancel', root);
+  const modelRemove = $('#asr-model-remove', root);
   const statsLine = $('#storage-stats', root);
   const storageLine = $('#storage-status', root);
   const usageLine = $('#storage-usage', root);
@@ -55,6 +67,10 @@ export function createSettingsView({
 
   // The form is presentational: every control persists immediately.
   form?.addEventListener('submit', (event) => event.preventDefault());
+
+  modelDownload?.addEventListener('click', () => onModelDownload());
+  modelCancel?.addEventListener('click', () => onModelCancel());
+  modelRemove?.addEventListener('click', () => onModelRemove());
 
   formatContainer?.addEventListener('change', (event) => {
     const input = event.target;
@@ -180,12 +196,14 @@ export function createSettingsView({
    *   storageProtected?: boolean|null,
    *   storage?: { usage: number, quota: number, percent: number|null, level: string }|null,
    *   topRecordings?: object[],
+   *   model?: object,
    * }} [extra]
    */
   function render(
     settings,
-    { stats, storageProtected = null, storage = null, topRecordings = [] } = {},
+    { stats, storageProtected = null, storage = null, topRecordings = [], model = null } = {},
   ) {
+    if (model) renderModel(model);
     if (formatContainer) {
       const chosen = Array.from(formatContainer.querySelectorAll('input[name="format"]')).find(
         (input) => input.value === settings.format && !input.disabled,
@@ -284,5 +302,80 @@ export function createSettingsView({
     }
   }
 
-  return { setStatic, render };
+  /**
+   * Paint the speech-model block: status, byte progress and the three actions.
+   *
+   * The model is ~45 MB, so the UI always says what is (or is not) stored on
+   * this device instead of promising that "it is downloaded once".
+   *
+   * @param {{
+   *   status?: 'unsupported'|'unknown'|'absent'|'partial'|'ready'|'downloading'|'error',
+   *   complete?: number,
+   *   total?: number,
+   *   bytes?: number,
+   *   fraction?: number|null,
+   *   detail?: string,
+   * }} [model]
+   */
+  function renderModel(model = {}) {
+    const status = model.status ?? 'unknown';
+    const size = formatBytes(model.bytes ?? asrModelBytes);
+    const percent = Math.round(Math.max(0, Math.min(1, Number(model.fraction) || 0)) * 100);
+    const downloading = status === 'downloading';
+
+    if (modelBox) {
+      modelBox.dataset.state = status;
+      modelBox.setAttribute('aria-busy', downloading ? 'true' : 'false');
+    }
+
+    if (modelStatus) {
+      let text;
+      switch (status) {
+        case 'ready':
+          text = t('settings.asrModelReady');
+          break;
+        case 'downloading':
+          text = t('settings.asrModelDownloading', { percent });
+          break;
+        case 'partial':
+          text = t('settings.asrModelPartial', {
+            complete: model.complete ?? 0,
+            total: model.total ?? 0,
+          });
+          break;
+        case 'absent':
+          text = t('settings.asrModelAbsent', { size });
+          break;
+        case 'error':
+          text = model.detail || t('settings.asrModelError');
+          break;
+        case 'unsupported':
+          text = t('settings.asrModelUnsupported');
+          break;
+        default:
+          text = t('settings.asrModelUnknown', { size });
+      }
+      modelStatus.textContent = text;
+    }
+
+    setFlag(modelProgress, 'hidden', !downloading);
+    if (modelProgress) {
+      modelProgress.value = percent;
+      modelProgress.textContent = `${percent}%`;
+      if (downloading) {
+        modelProgress.setAttribute(
+          'aria-valuetext',
+          t('settings.asrModelDownloading', { percent }),
+        );
+      } else {
+        modelProgress.removeAttribute('aria-valuetext');
+      }
+    }
+
+    setFlag(modelDownload, 'hidden', downloading || status === 'ready' || status === 'unsupported');
+    setFlag(modelCancel, 'hidden', !downloading);
+    setFlag(modelRemove, 'hidden', !(status === 'ready' || status === 'partial'));
+  }
+
+  return { setStatic, render, renderModel };
 }

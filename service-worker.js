@@ -52,6 +52,7 @@ const SHELL_ASSETS = [
   './scripts/modules/library-view.js',
   './scripts/modules/live-transcript.js',
   './scripts/modules/mime.js',
+  './scripts/modules/model-manager.js',
   './scripts/modules/mp3-wasm.js',
   './scripts/modules/mp3-worker.js',
   './scripts/modules/mp3.js',

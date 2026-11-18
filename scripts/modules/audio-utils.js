@@ -230,7 +230,61 @@ export function downloadBlob(blob, filename) {
 }
 
 /**
+ * Save a blob to the device, through the share sheet when the browser cannot
+ * download it itself.
+ *
+ * iOS Safari (especially an installed PWA) ignores `a[download]` for blob URLs
+ * and just opens the file, so the "download" silently looks like nothing
+ * happened. There the OS share sheet — which offers “Save to Files” — is the
+ * only reliable way to keep the file. Desktop and Android keep the plain
+ * download, which is faster and lands in the Downloads folder.
+ *
+ * @param {Blob} blob
+ * @param {string} filename
+ * @param {{ title?: string, text?: string }} [meta]
+ * @returns {Promise<'downloaded'|'shared'|'cancelled'>}
+ */
+export async function saveBlob(blob, filename, meta = {}) {
+  if (needsShareSheet()) {
+    const file = toFile(blob, filename);
+    try {
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: meta.title ?? filename, text: meta.text });
+        return 'shared';
+      }
+    } catch (error) {
+      // The user closed the sheet: saving a second copy would be a surprise.
+      if (error?.name === 'AbortError') return 'cancelled';
+    }
+  }
+  downloadBlob(blob, filename);
+  return 'downloaded';
+}
+
+/**
+ * Whether this browser needs the share sheet to save a blob.
+ *
+ * Limited to iOS (all browsers there use WebKit) and installed PWAs, where the
+ * download attribute is unreliable; elsewhere it works and is less intrusive.
+ *
+ * @returns {boolean}
+ */
+function needsShareSheet() {
+  if (typeof navigator === 'undefined') return false;
+  if (typeof navigator.canShare !== 'function' || typeof navigator.share !== 'function') {
+    return false;
+  }
+  const ua = navigator.userAgent ?? '';
+  const ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const standalone =
+    globalThis.matchMedia?.('(display-mode: standalone)')?.matches === true ||
+    navigator.standalone === true;
+  return ios || standalone;
+}
+
+/**
  * Wrap a blob in a File so the Web Share API can share it.
+ *
  * @param {Blob} blob
  * @param {string} filename
  * @returns {File|Blob}

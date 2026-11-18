@@ -1074,6 +1074,68 @@ input[type='range'] {
   margin: 0;
 }
 
+/* ---------------------------------------------------------- speech model --- */
+/* The model is ~45 MB kept on the device: its state, not a marketing line,
+   tells the user whether transcription works without a connection. */
+
+.model {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+}
+
+.model__status {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.model__bar {
+  display: block;
+  width: 100%;
+  height: 0.6rem;
+  margin-top: var(--space-2);
+  accent-color: var(--color-primary);
+}
+
+.model__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.model__actions:empty {
+  margin-top: 0;
+}
+
+.model[data-state='ready'] {
+  border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success) 6%, var(--color-surface));
+}
+
+.model[data-state='ready'] .model__status {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.model[data-state='downloading'] .model__status {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.model[data-state='error'] {
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger) 6%, var(--color-surface));
+}
+
+.model[data-state='error'] .model__status {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
 .radio-grid {
   display: grid;
   gap: var(--space-1);

@@ -21,7 +21,7 @@ import {
   convertToMp3,
   convertToWav,
   decodeBlob,
-  downloadBlob,
+  saveBlob,
   shareRecording,
   trimToWav,
 } from './modules/audio-utils.js';
@@ -47,6 +47,14 @@ import { createLibraryView } from './modules/library-view.js';
 import { LIBRARY_PAGE_SIZE, SORT_OPTIONS, pageWindow, topRecordings } from './modules/library.js';
 import { createLiveTranscript } from './modules/live-transcript.js';
 import { extensionForMime, resolveFormat } from './modules/mime.js';
+import {
+  assertSpace,
+  clearModel,
+  downloadModel,
+  manifestBytes,
+  modelStatus,
+  readManifest,
+} from './modules/model-manager.js';
 import { MP3_ENCODER_AVAILABLE } from './modules/mp3.js';
 import {
   buildAudioConstraints,
@@ -103,6 +111,28 @@ const app = {
   liveCaptionActive: false,
   /** @type {AbortController|null} the transcription the cancel button targets */
   transcribeAbort: null,
+  /**
+   * What the last check learned about the on-device speech model. Repainted by
+   * `renderSettings`, so the panel never claims a ~45 MB download happened.
+   * @type {{
+   *   status: 'unsupported'|'unknown'|'absent'|'partial'|'ready'|'downloading'|'error',
+   *   complete: number,
+   *   total: number,
+   *   bytes: number,
+   *   fraction: number|null,
+   *   detail: string,
+   * }}
+   */
+  model: {
+    status: 'unknown',
+    complete: 0,
+    total: 0,
+    bytes: ASR_MODEL_BYTES,
+    fraction: null,
+    detail: '',
+  },
+  /** true when the last check found every model file on this device */
+  modelReady: false,
 };
 
 /** Views and services, created in `init()`. */
@@ -121,6 +151,10 @@ let conversionJob = null;
 let transcriber = null;
 /** Live caption preview (created in `init`). */
 let liveTranscript = null;
+/** @type {AbortController|null} the model download the cancel button targets */
+let modelJob = null;
+/** Parsed `model-package.json` (cached so the status check works offline). */
+let modelManifest = null;
 
 /** Bound translator: always reads the current locale. */
 const t = (key, params) => app.t(key, params);
@@ -491,15 +525,15 @@ async function downloadRecording(id) {
     toaster.show({ message: t('errors.notFound'), tone: 'error' });
     return;
   }
-  downloadBlob(
-    blob,
-    buildFileName({
-      name: sanitizeFileName(record.name),
-      extension: record.extension,
-      date: record.createdAt ? new Date(record.createdAt) : new Date(),
-    }),
-  );
-  toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+  const filename = buildFileName({
+    name: sanitizeFileName(record.name),
+    extension: record.extension,
+    date: record.createdAt ? new Date(record.createdAt) : new Date(),
+  });
+  const saved = await saveBlob(blob, filename, { title: record.name });
+  if (saved === 'downloaded') {
+    toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+  }
 }
 
 async function shareRecordingById(id) {
@@ -520,19 +554,24 @@ async function shareRecordingById(id) {
     toaster.show({ message: t('errors.notFound'), tone: 'error' });
     return;
   }
-  const result = await shareRecording(
-    blob,
-    buildFileName({
-      name: sanitizeFileName(record.name),
-      extension: record.extension,
-      date: record.createdAt ? new Date(record.createdAt) : new Date(),
-    }),
-    { title: record.name, text: t('app.title') },
-  );
+  const filename = buildFileName({
+    name: sanitizeFileName(record.name),
+    extension: record.extension,
+    date: record.createdAt ? new Date(record.createdAt) : new Date(),
+  });
+  const result = await shareRecording(blob, filename, {
+    title: record.name,
+    text: t('app.title'),
+  });
   if (result === 'shared') {
     toaster.show({ message: t('toast.shared', { name: record.name }), tone: 'success' });
   } else if (result === 'unsupported') {
-    toaster.show({ message: t('errors.shareUnavailable'), tone: 'error' });
+    // No share sheet here (desktop Firefox, some in-app browsers): hand the user
+    // the file through the download path instead of an error she cannot act on.
+    const saved = await saveBlob(blob, filename, { title: record.name });
+    if (saved === 'downloaded') {
+      toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+    }
   }
 }
 
@@ -761,11 +800,14 @@ async function zipRecordings(records) {
     }
 
     const { parts } = createZipParts(entries, { date: new Date() });
-    downloadBlob(
+    const saved = await saveBlob(
       new Blob(parts, { type: 'application/zip' }),
       `audio-recordings_${timestampForFilename()}.zip`,
+      { title: t('actions.download') },
     );
-    toaster.show({ message: t('toast.zipped', { count: entries.length }), tone: 'success' });
+    if (saved === 'downloaded') {
+      toaster.show({ message: t('toast.zipped', { count: entries.length }), tone: 'success' });
+    }
   } catch (error) {
     toaster.show({ message: t('errors.zipFailed'), tone: 'error' });
     console.warn('[zip] failed', error);
@@ -1050,6 +1092,197 @@ async function handleLibraryIntent(intent) {
   }
 }
 
+// ------------------------------------------------------------ speech model ---
+
+/**
+ * Re-check which model files are on this device and repaint the panel.
+ *
+ * Read-only and offline-safe (the manifest is cached next to the files). It runs
+ * when the settings disclosure opens and after a transcription: the first
+ * transcription fills the Transformers.js cache, so the panel must switch to
+ * “saved on this device” instead of leaving a download button on screen.
+ */
+async function refreshModel() {
+  if (!asrSupported) {
+    app.modelReady = false;
+    app.model = {
+      status: 'unsupported',
+      complete: 0,
+      total: 0,
+      bytes: ASR_MODEL_BYTES,
+      fraction: null,
+      detail: '',
+    };
+    renderSettings();
+    return;
+  }
+  // While a download runs, its progress owns the block.
+  if (modelJob) return;
+
+  try {
+    modelManifest ??= await readManifest();
+    const status = await modelStatus({ manifest: modelManifest });
+    let state = 'absent';
+    if (!status.supported) state = 'unsupported';
+    else if (status.ready) state = 'ready';
+    else if (status.complete > 0) state = 'partial';
+
+    app.modelReady = status.ready;
+    app.model = {
+      status: state,
+      complete: status.complete,
+      total: status.total,
+      bytes: status.bytes,
+      fraction: null,
+      detail: '',
+    };
+  } catch (error) {
+    // No manifest and no network: say “could not check”, never “no model”.
+    app.modelReady = false;
+    app.model = {
+      status: error?.code === 'modelManifestInvalid' ? 'error' : 'unknown',
+      complete: 0,
+      total: 0,
+      bytes: ASR_MODEL_BYTES,
+      fraction: null,
+      detail: errorMessage(error?.code ?? 'unknown', error?.message ?? ''),
+    };
+    console.info('[model] could not check the on-device model', error);
+  }
+  renderSettings();
+}
+
+/**
+ * Download the ~45 MB speech model once, with progress and a cancel button.
+ *
+ * The download runs here (not in the worker) so the panel can show byte
+ * progress, refuse a device without room and stay cancellable. Files land in
+ * the service worker's model cache only after their checksum matches, so an
+ * interrupted run never looks installed.
+ */
+async function downloadSpeechModel() {
+  if (modelJob) return;
+  if (!asrSupported) {
+    toaster.show({ message: t('errors.asrUnsupported'), tone: 'error' });
+    return;
+  }
+  if (app.transcribingId) {
+    // The worker and the model cache would fight over the same files.
+    toaster.show({ message: t('errors.asrBusy'), tone: 'error' });
+    return;
+  }
+
+  let manifest = modelManifest;
+  if (!manifest) {
+    try {
+      manifest = await readManifest();
+      modelManifest = manifest;
+    } catch (error) {
+      const message = errorMessage(error?.code ?? 'modelManifestUnavailable');
+      app.model = { ...app.model, status: 'error', fraction: null, detail: message };
+      renderSettings();
+      toaster.show({ message, tone: 'error' });
+      return;
+    }
+  }
+
+  // Phones on a metered plan: refuse before spending the data.
+  try {
+    await assertSpace(manifestBytes(manifest));
+  } catch (error) {
+    const message = errorMessage(error?.code ?? 'modelNoSpace');
+    app.model = { ...app.model, status: 'error', fraction: null, detail: message };
+    renderSettings();
+    toaster.show({ message, tone: 'error' });
+    return;
+  }
+
+  const job = new AbortController();
+  modelJob = job;
+  app.model = {
+    status: 'downloading',
+    complete: 0,
+    total: Object.keys(manifest.files).length,
+    bytes: manifestBytes(manifest),
+    fraction: 0,
+    detail: '',
+  };
+  renderSettings();
+
+  let lastPaint = 0;
+  try {
+    const result = await downloadModel({
+      manifest,
+      signal: job.signal,
+      onProgress: ({ fraction }) => {
+        // Byte callbacks arrive far faster than the screen can use them.
+        const now = Date.now();
+        if (now - lastPaint < 120 || modelJob !== job) return;
+        lastPaint = now;
+        app.model = { ...app.model, fraction };
+        settingsView.renderModel(app.model);
+      },
+    });
+
+    app.modelReady = true;
+    app.model = {
+      status: 'ready',
+      complete: result.files,
+      total: result.files,
+      bytes: result.bytes,
+      fraction: 1,
+      detail: '',
+    };
+    renderSettings();
+    toaster.show({ message: t('toast.modelReady'), tone: 'success' });
+  } catch (error) {
+    if (error?.code === 'cancelled' || job.signal.aborted) {
+      modelJob = null;
+      toaster.show({ message: t('toast.modelDownloadCancelled'), tone: 'info' });
+      await refreshModel();
+      return;
+    }
+    const message = errorMessage(error?.code ?? 'modelDownloadFailed');
+    app.model = { ...app.model, status: 'error', fraction: null, detail: message };
+    renderSettings();
+    toaster.show({ message, tone: 'error' });
+    console.warn('[model] download failed', error);
+  } finally {
+    if (modelJob === job) modelJob = null;
+  }
+}
+
+/** Delete the cached model; recordings and transcripts are untouched. */
+async function removeSpeechModel() {
+  if (modelJob) {
+    toaster.show({ message: t('errors.asrModelDownloading'), tone: 'error' });
+    return;
+  }
+  if (app.transcribingId) {
+    toaster.show({ message: t('errors.asrBusy'), tone: 'error' });
+    return;
+  }
+
+  const confirmed = await dialogs.confirm({
+    title: t('dialog.modelRemoveTitle'),
+    body: t('dialog.modelRemoveBody', { size: formatBytes(ASR_MODEL_BYTES) }),
+    acceptLabel: t('settings.asrModelRemove'),
+  });
+  if (!confirmed) return;
+
+  try {
+    await clearModel();
+    toaster.show({ message: t('toast.modelRemoved'), tone: 'success' });
+  } catch (error) {
+    console.warn('[model] could not remove the cached files', error);
+    toaster.show({ message: errorMessage('unknown', error?.message ?? ''), tone: 'error' });
+  }
+  // The cached manifest went with the files: re-read it so a new release is
+  // picked up the next time the panel is painted.
+  modelManifest = null;
+  await refreshModel();
+}
+
 // ---------------------------------------------------------- transcription ---
 
 /** Whether this browser can run the local speech model at all. */
@@ -1118,6 +1351,15 @@ async function transcribeRecording(id) {
     toaster.show({ message: t('errors.asrBusy'), tone: 'error' });
     return;
   }
+  // Offline and the files are not on this device: say so now instead of after
+  // decoding 30 s of audio that the worker cannot possibly transcribe.
+  if (
+    navigator.onLine === false &&
+    (app.model.status === 'absent' || app.model.status === 'partial')
+  ) {
+    toaster.show({ message: t('errors.modelMissingOffline'), tone: 'error' });
+    return;
+  }
 
   const job = new AbortController();
   app.transcribingId = id;
@@ -1170,6 +1412,9 @@ async function transcribeRecording(id) {
     app.transcribingId = null;
     libraryView.clearTranscribeProgress(id);
     renderLibrary();
+    // The first transcription fills the Transformers.js cache: repaint the
+    // panel so it stops offering a download that already happened.
+    if (app.model.status !== 'ready') refreshModel();
   }
 }
 
@@ -1240,7 +1485,7 @@ function transcriptFileName(record, extension) {
  * @param {string} id
  * @param {'txt'|'srt'} format
  */
-function downloadTranscript(id, format) {
+async function downloadTranscript(id, format) {
   const record = repo.get(id);
   if (!record?.transcript) {
     toaster.show({ message: t('errors.notFound'), tone: 'error' });
@@ -1257,11 +1502,14 @@ function downloadTranscript(id, format) {
     });
     return;
   }
-  downloadBlob(
+  const saved = await saveBlob(
     new Blob([body], { type: 'text/plain;charset=utf-8' }),
     transcriptFileName(record, format),
+    { title: record.name },
   );
-  toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+  if (saved === 'downloaded') {
+    toaster.show({ message: t('toast.downloaded'), tone: 'success' });
+  }
 }
 
 /** Copy the transcript (edited or not) to the clipboard. */
@@ -1410,6 +1658,7 @@ function renderSettings() {
     storageProtected: app.storageProtected,
     storage: storageModel(),
     topRecordings: topRecordings(repo.all(), 5),
+    model: app.model,
   });
   syncHeaderControls();
   updateFooter();
@@ -1507,6 +1756,8 @@ function handleSettingsReset() {
 /** Show the offline badge when the browser reports no connection. */
 function syncOnlineState() {
   setFlag($('#offline-badge'), 'hidden', navigator.onLine !== false);
+  // A check made while offline could not read the manifest: retry now.
+  if (navigator.onLine !== false && settingsView && !modelJob) refreshModel();
 }
 
 /** Ask the browser to keep our data out of automatic eviction. */
@@ -1706,6 +1957,9 @@ async function init() {
     asrModelBytes: ASR_MODEL_BYTES,
     onChange: handleSettingsChange,
     onReset: handleSettingsReset,
+    onModelDownload: () => downloadSpeechModel(),
+    onModelCancel: () => modelJob?.abort(),
+    onModelRemove: () => removeSpeechModel(),
   });
   // The worker is only *spawned* on the first transcription; creating the
   // client here keeps `isBusy`/`dispose` available to the rest of the wiring.
@@ -1772,6 +2026,11 @@ async function init() {
     if (event.target instanceof HTMLSelectElement) handleLocaleChange(event.target.value);
   });
   $('#install-btn')?.addEventListener('click', () => handleInstall());
+  // Re-check the model whenever the settings panel opens: another tab or a
+  // transcription may have changed what is stored.
+  $('#settings-panel')?.addEventListener('toggle', (event) => {
+    if (event.target instanceof HTMLDetailsElement && event.target.open) refreshModel();
+  });
 
   window.addEventListener('online', syncOnlineState);
   window.addEventListener('offline', syncOnlineState);
@@ -1806,6 +2065,9 @@ async function init() {
   syncOnlineState();
 
   await initStorage();
+  // Paint the model block once storage is ready; the check itself is async and
+  // must not delay the first render.
+  refreshModel();
   registerServiceWorker();
 }
 

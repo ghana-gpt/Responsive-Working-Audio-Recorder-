@@ -125,6 +125,9 @@ export const messages = {
     'dialog.largeExportTitle': 'Build a large archive?',
     'dialog.largeExportBody':
       'This download is about {size}. The browser keeps the audio on this device until the save finishes, and it may take a while.',
+    'dialog.modelRemoveTitle': 'Remove the speech model?',
+    'dialog.modelRemoveBody':
+      'Transcription will need to download about {size} again before it can work offline. Your recordings and transcripts are not affected.',
     'dialog.deleteTranscriptTitle': 'Delete this transcript?',
     'dialog.deleteTranscriptBody':
       'The transcript of “{name}” will be removed. The audio itself is kept and can be transcribed again at any time.',
@@ -182,9 +185,22 @@ export const messages = {
     'settings.liveTranscribe': 'Show live captions while recording',
     'settings.asrLanguage': 'Spoken language',
     'settings.speechHint':
-      'Transcription runs on this device with Whisper. Nothing is uploaded, and the model is downloaded once then cached, so it keeps working offline.',
-    'settings.asrModelHint':
-      'Model: {model} · {size} downloaded once, then served from this device’s cache',
+      'Transcription runs on this device with Whisper. Nothing is uploaded. The speech model stays on this device so it keeps working offline; download it once below to use it without a connection.',
+    'settings.asrModelHint': 'Model: {model} · {size}',
+    'settings.asrModelReady': 'Saved on this device — transcription also works offline.',
+    'settings.asrModelAbsent':
+      'Not saved on this device yet ({size}). Download it once to transcribe, including offline.',
+    'settings.asrModelPartial':
+      'Partly saved ({complete} of {total} files). Finish the download to transcribe offline.',
+    'settings.asrModelDownloading': 'Downloading the speech model… {percent}%',
+    'settings.asrModelError': 'The download did not finish. Try again.',
+    'settings.asrModelUnknown':
+      'Could not check whether the model ({size}) is saved on this device. Check your connection and try again.',
+    'settings.asrModelUnsupported':
+      'This browser cannot keep the model on the device, so transcription only works while the files can be reached.',
+    'settings.asrModelDownload': 'Download for offline use',
+    'settings.asrModelCancel': 'Cancel download',
+    'settings.asrModelRemove': 'Remove from device',
     'settings.asrUnsupported':
       'This browser cannot run the speech model (WebAssembly or module workers are unavailable).',
 
@@ -259,7 +275,19 @@ export const messages = {
       'Another conversion is already running. Wait for it to finish, then try again.',
     'errors.asrFailed': 'Transcription failed: {message}',
     'errors.asrModelMissing':
-      'The speech model is not available. Check your connection and try again. If you run the app from a source checkout, install it once with “npm run models:download”.',
+      'The speech model is not saved on this device yet. Open “Speech to text” in Settings and choose “Download for offline use” — once, while you are online.',
+    'errors.asrModelDownloading': 'The speech model is still downloading. Wait for it to finish.',
+    'errors.modelManifestUnavailable':
+      'Could not read the model information. Check your connection and try again.',
+    'errors.modelDownloadFailed':
+      'The speech model could not be downloaded. Check your connection and try again.',
+    'errors.modelCorrupt':
+      'The downloaded speech model failed its integrity check. Please try again.',
+    'errors.modelNoSpace':
+      'Not enough free storage for the speech model. Free some space and try again.',
+    'errors.modelUnsupported': 'This browser cannot store the speech model on the device.',
+    'errors.modelMissingOffline':
+      'The speech model is not on this device and you are offline. Connect to the internet, then choose “Download for offline use” in Settings → Speech to text.',
     'errors.asrUnsupported': 'This browser cannot run the speech model.',
     'errors.asrBusy': 'A transcription is already running. Wait for it to finish.',
     'errors.emptyAudio': 'There is no audio to transcribe.',
@@ -269,6 +297,9 @@ export const messages = {
     'toast.transcriptSaved': 'Transcript updated.',
     'toast.transcriptDeleted': 'Transcript deleted.',
     'toast.transcriptionCancelled': 'Transcription cancelled — nothing was changed.',
+    'toast.modelReady': 'Speech model saved — transcription now works offline.',
+    'toast.modelRemoved': 'Speech model removed from this device.',
+    'toast.modelDownloadCancelled': 'Model download cancelled — nothing was changed.',
     'toast.copied': 'Transcript copied to the clipboard.',
     'toast.copyFailed': 'Could not copy. Select the text and copy it manually.',
 
@@ -431,6 +462,9 @@ export const messages = {
     'dialog.largeExportTitle': 'Créer une archive volumineuse ?',
     'dialog.largeExportBody':
       'Ce téléchargement fait environ {size}. Le navigateur conserve l’audio sur cet appareil jusqu’à la fin de l’enregistrement, ce qui peut prendre du temps.',
+    'dialog.modelRemoveTitle': 'Supprimer le modèle vocal ?',
+    'dialog.modelRemoveBody':
+      'La transcription devra retélécharger environ {size} avant de fonctionner hors ligne. Vos enregistrements et transcriptions ne sont pas concernés.',
     'dialog.deleteTranscriptTitle': 'Supprimer cette transcription ?',
     'dialog.deleteTranscriptBody':
       'La transcription de « {name} » sera supprimée. L’audio est conservé et peut être retranscrit à tout moment.',
@@ -492,9 +526,23 @@ export const messages = {
     'settings.liveTranscribe': 'Afficher les sous-titres en direct pendant l’enregistrement',
     'settings.asrLanguage': 'Langue parlée',
     'settings.speechHint':
-      'La transcription s’exécute sur cet appareil avec Whisper. Rien n’est envoyé ; le modèle est téléchargé une fois puis mis en cache, ce qui permet de travailler hors ligne.',
-    'settings.asrModelHint':
-      'Modèle : {model} · {size} téléchargés une fois, puis servis depuis le cache de cet appareil',
+      'La transcription s’exécute sur cet appareil avec Whisper. Rien n’est envoyé. Le modèle vocal reste sur cet appareil pour continuer à fonctionner hors ligne ; téléchargez-le une fois ci-dessous pour l’utiliser sans connexion.',
+    'settings.asrModelHint': 'Modèle : {model} · {size}',
+    'settings.asrModelReady':
+      'Enregistré sur cet appareil — la transcription fonctionne aussi hors ligne.',
+    'settings.asrModelAbsent':
+      'Pas encore enregistré sur cet appareil ({size}). Téléchargez-le une fois pour transcrire, même hors ligne.',
+    'settings.asrModelPartial':
+      'Partiellement enregistré ({complete} fichiers sur {total}). Terminez le téléchargement pour transcrire hors ligne.',
+    'settings.asrModelDownloading': 'Téléchargement du modèle vocal… {percent} %',
+    'settings.asrModelError': 'Le téléchargement ne s’est pas terminé. Réessayez.',
+    'settings.asrModelUnknown':
+      'Impossible de vérifier si le modèle ({size}) est enregistré sur cet appareil. Vérifiez votre connexion et réessayez.',
+    'settings.asrModelUnsupported':
+      'Ce navigateur ne peut pas conserver le modèle sur l’appareil : la transcription ne fonctionne que lorsque les fichiers sont accessibles.',
+    'settings.asrModelDownload': 'Télécharger pour un usage hors ligne',
+    'settings.asrModelCancel': 'Annuler le téléchargement',
+    'settings.asrModelRemove': 'Supprimer de l’appareil',
     'settings.asrUnsupported':
       'Ce navigateur ne peut pas exécuter le modèle vocal (WebAssembly ou les workers de module sont indisponibles).',
 
@@ -577,7 +625,21 @@ export const messages = {
       'Une autre conversion est déjà en cours. Attendez qu’elle se termine, puis réessayez.',
     'errors.asrFailed': 'La transcription a échoué : {message}',
     'errors.asrModelMissing':
-      'Le modèle vocal est indisponible. Vérifiez votre connexion et réessayez. Si vous exécutez l’application depuis les sources, installez-le une fois avec « npm run models:download ».',
+      'Le modèle vocal n’est pas encore enregistré sur cet appareil. Ouvrez « Reconnaissance vocale » dans les réglages et choisissez « Télécharger pour un usage hors ligne » — une seule fois, en ligne.',
+    'errors.asrModelDownloading':
+      'Le modèle vocal est en cours de téléchargement. Attendez la fin.',
+    'errors.modelManifestUnavailable':
+      'Impossible de lire les informations du modèle. Vérifiez votre connexion et réessayez.',
+    'errors.modelDownloadFailed':
+      'Le modèle vocal n’a pas pu être téléchargé. Vérifiez votre connexion et réessayez.',
+    'errors.modelCorrupt':
+      'Le modèle vocal téléchargé a échoué au contrôle d’intégrité. Réessayez.',
+    'errors.modelNoSpace':
+      'Espace de stockage insuffisant pour le modèle vocal. Libérez de l’espace et réessayez.',
+    'errors.modelUnsupported':
+      'Ce navigateur ne peut pas conserver le modèle vocal sur l’appareil.',
+    'errors.modelMissingOffline':
+      'Le modèle vocal n’est pas sur cet appareil et vous êtes hors ligne. Connectez-vous à Internet, puis choisissez « Télécharger pour un usage hors ligne » dans Réglages → Reconnaissance vocale.',
     'errors.asrUnsupported': 'Ce navigateur ne peut pas exécuter le modèle vocal.',
     'errors.asrBusy': 'Une transcription est déjà en cours. Attendez qu’elle se termine.',
     'errors.emptyAudio': 'Il n’y a aucun audio à transcrire.',
@@ -587,6 +649,10 @@ export const messages = {
     'toast.transcriptSaved': 'Transcription mise à jour.',
     'toast.transcriptDeleted': 'Transcription supprimée.',
     'toast.transcriptionCancelled': 'Transcription annulée — rien n’a été modifié.',
+    'toast.modelReady':
+      'Modèle vocal enregistré — la transcription fonctionne désormais hors ligne.',
+    'toast.modelRemoved': 'Modèle vocal supprimé de cet appareil.',
+    'toast.modelDownloadCancelled': 'Téléchargement du modèle annulé — rien n’a été modifié.',
     'toast.copied': 'Transcription copiée dans le presse-papiers.',
     'toast.copyFailed': 'Copie impossible. Sélectionnez le texte et copiez-le manuellement.',
 
